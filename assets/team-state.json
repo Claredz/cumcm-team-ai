@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "competition": "CUMCM",
+  "year": null,
+  "phase": "preparation",
+  "group": null,
+  "problem_id": null,
+  "question_count": null,
+  "timezone": "Asia/Shanghai",
+  "deadlines": {"start": null, "internal_finish": null, "md5": null, "upload_start": null, "upload_end": null},
+  "rules": {"checked_at": null, "sources": [], "regional_requirements": [], "unverified": []},
+  "team": [
+    {"id": "A", "strengths": [], "responsibility": "modeling", "sleep_windows": []},
+    {"id": "B", "strengths": [], "responsibility": "computation", "sleep_windows": []},
+    {"id": "C", "strengths": [], "responsibility": "writing_delivery", "sleep_windows": []}
+  ],
+  "state_writer": null,
+  "questions": [],
+  "tasks": [],
+  "decisions": [],
+  "approved_runs": [],
+  "claims": [],
+  "ai_usage_records": [],
+  "blockers": [],
+  "next_sync": null,
+  "handoff": null,
+  "submission": {"frozen_files": [], "md5_receipt": null, "upload_receipt": null}
+}

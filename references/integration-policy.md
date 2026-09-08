@@ -7,10 +7,11 @@
 1. 默认 autonomous；旧文档的强制编号问答和每次评分后确认只适用于 guided 模式。例行修错、参数试跑、章节整理由 AI 执行，关键事项集中交接。
 2. high issue 阻止产物放行，先自动修复重跑；实质缺输入或需要队员判断才询问。不得删除问题记录来伪造通过。
 3. 固定图数、公式数、最低页数、caption 字数、图占比和统一字体只作建议，不构成阻断。官方上限必须满足。模型可选机理、统计或机器学习，以题目及验证决定。
-4. 国赛采用 competitions/cumcm/current_rules.md 的 2026 新规则；旧 2025 AI 位置作废。2026 国赛 74h、2027 MCM/ICM 99h 根据官方起止计算，旧 72/96 仅作内部预算。
-5. `state/decision_log.json` 是项目根状态与学术阶段权威，兼容上游 v3.1 字段并加入 workflow 扩展；`state/task_dag.json` 仅在 Stage 2 后作为从属任务执行账本，对任务执行状态权威。二者通过 `workflow.py status/reconcile` 对账，不允许各自独立解释“项目是否完成”。旧 team-state.json 仅作迁移输入。阶段状态单写者。
-6. 假设变化影响解时，应重建/重算依赖模型；不可仅对旧结果重画图。区分固定决策参数扰动与每情景重新优化。
-7. 经验分位不能自动决定模型数量、最低论文厚度或奖项。所有语料下载仅赛前按来源许可执行。
-8. 论文主线采用三赛事原创装配模板，不依赖 cumcmthesis 类。生产指南提到该类时仅视为可选替代，本包未再分发该类文件。
+4. **创新协议以 `references/structural-innovation.md` 为准。** 先扫描问题结构，再决定 formulation 和 solver；算法数量、冷门程度、拼接或命名不构成创新证据。Stage 2/3/6/8 的结构扫描、baseline/proposed 对比、innovation claim 和定向 failure test 覆盖旧资料中“改进算法即创新”的建议。允许没有创新点，禁止为凑数量制造伪创新。
+5. 国赛采用 competitions/cumcm/current_rules.md 的 2026 新规则；旧 2025 AI 位置作废。2026 国赛 74h、2027 MCM/ICM 99h 根据官方起止计算，旧 72/96 仅作内部预算。
+6. `state/decision_log.json` 是项目根状态与学术阶段权威，兼容上游 v3.1 字段并加入 workflow 扩展；`state/task_dag.json` 仅在 Stage 2 后作为从属任务执行账本，对任务执行状态权威。二者通过 `workflow.py status/reconcile` 对账，不允许各自独立解释“项目是否完成”。旧 team-state.json 仅作迁移输入。阶段状态单写者。
+7. 假设变化影响解时，应重建/重算依赖模型；不可仅对旧结果重画图。区分固定决策参数扰动与每情景重新优化。若创新候选被验证推翻，只撤销该创新表述并按依赖 invalidate 必要下游，不要求为了“保创新”继续使用错误方案。
+8. 经验分位不能自动决定模型数量、最低论文厚度或奖项。所有语料下载仅赛前按来源许可执行。
+9. 论文主线采用三赛事原创装配模板，不依赖 cumcmthesis 类。生产指南提到该类时仅视为可选替代，本包未再分发该类文件。
 
 fast/standard/championship 控制反馈深度，autonomous/guided 控制交互频率，两者独立。剩余时间不足按实证风险裁剪反馈，不固定在最后六小时扩张代理。

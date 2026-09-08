@@ -7,206 +7,200 @@ inputs:
   - "problem_pdf"
   - "attachment_data_paths"
 outputs:
-  - "stage.2.{decomposition, key_variables, key_constraints, objective_per_subproblem, data_schema, subproblem_dependency}"
-loads_reference: ["references/rubrics.md§Stage_2"]
+  - "stage.2.{decomposition, key_variables, key_constraints, objective_per_subproblem, data_schema, subproblem_dependency, structure_scan, innovation_opportunities}"
+loads_reference:
+  - "references/rubrics.md§Stage_2"
+  - "references/structural-innovation.md"
 feedback: ["L1"]
 next: stage_03_model_selection
 ---
 
-# Stage 2 — 问题深度解析与分解
+# Stage 2 — 问题深度解析、结构扫描与分解
 
 > v2 适配：本页为导入参考。执行前以根 SKILL.md 和 references/integration-policy.md 为准：默认自主推进，普通修错不等待确认；固定图数/字数只作建议；赛事规则与 AI 披露以当前比赛包为准。旧问答示例仅用于 guided 模式。
 
 **时长**: 2-3h | **反馈层**: L1
 
----
-
 ## 目标
 
-把题目从**自然语言描述**转化为**数学语言骨架**: 识别决策变量、目标函数、约束、子问题间关系。这一步质量决定后续 5/6/8 阶段的天花板。
+把题目从自然语言转化为数学语言骨架：识别决策变量、目标函数、约束、数据接口和子问题关系；同时在选算法前执行一次**问题结构扫描**，寻找可验证的降维、消元、分解、粗到细和搜索空间压缩机会。这一步决定后续 Stage 3/5/6/8 的天花板。
 
----
+结构扫描只生成 innovation hypothesis，不要求每题必须创新。找不到有依据的结构机会时明确记录 `none`，禁止为了创新感强行制造复杂模型。
 
 ## 输入
 
-- stage 1 输出: 选定题号 + 子问题清单 + 数据路径
-- 题目原文 (再读一次)
-- 附件数据 (用 pandas/Read 扫一遍 schema)
+- Stage 1 输出：选定题号 + 子问题清单 + 数据路径
+- 题目原文（再读一次）
+- 附件数据（用 pandas/Read 扫 schema）
+- `references/structural-innovation.md`
 
 ## 产出
 
-- 子问题分解树 (全部 Qi 的输入/输出/约束/目标)
-- 关键变量清单 (覆盖实际模型所需变量并标注决策/状态/参数；不设凑数下限)
-- 子问题间关联图，并区分**模型结构依赖**和**已验证结果依赖**
-- 目标函数雏形 (符号级,不必精确)
+- 子问题分解树（全部 Qi 的输入/输出/约束/目标）
+- 关键变量清单（决策/状态/参数）
+- 子问题关联图，区分**模型结构依赖**和**已验证结果依赖**
+- 目标函数雏形
 - 数据 schema 与变量映射
-
----
+- 每个 Qi 的 `structure_scan`
+- 0 个或多个 `innovation_opportunities`；它们仅是候选，不是论文创新点
 
 ## 操作流程
 
-### Step 1: 题目精读 (30 min)
+### Step 1：题目精读（30 min）
 
-**精读三遍,每遍不同任务:**
+精读三遍，每遍不同任务：
 
-第一遍 (10 min): 抓动词。题目让你做什么? "求最优..." / "预测..." / "评价..." → 决定问题类型。
+1. 抓动词：题目要求求最优、预测、评价、解释还是仿真？
+2. 抓约束：哪些条件不能违反，哪些只是背景描述？
+3. 抓数据接口：哪些参数题目给，哪些来自附件，哪些必须估计或假设？
 
-第二遍 (10 min): 抓约束。哪些条件不能违反? 列出来。
+### Step 2：子问题正式分解（45 min）
 
-第三遍 (10 min): 抓数据接口。哪些参数题目会给? 哪些要从附件提? 哪些要假设?
+对每个 Qi 填卡片：
 
-### Step 2: 子问题正式分解 (45 min)
-
-对每个 sub-problem Qi,填写卡片:
-
-```
+```text
 Q1 卡片
-├── 自然语言描述: <一句话提炼>
-├── 输入:
-│   - 题目给定参数: ...
-│   - 附件数据: 附件 1 第 X 列
-│   - 上游问题结果: 无 (Q1 是入口)
-├── 输出 (最终决策变量):
-│   - x_1, x_2, ... (含义、单位)
-├── 约束:
-│   - C1: ...
-│   - C2: ...
-├── 目标:
-│   - 最小化/最大化 <什么>
-├── 问题类型: <model_catalog 第几类>
-└── 难度估计: easy / medium / hard
+├── 自然语言描述
+├── 输入
+│   ├── 题目给定参数
+│   ├── 附件字段
+│   └── 上游结果
+├── 输出（最终决策/估计量，含单位）
+├── 约束
+├── 目标
+├── 问题类型
+└── 难度估计
 ```
 
-**关键**: 每张 Qi 卡片必须区分两种依赖：
+必须区分两种依赖：
 
-- `model_depends_on`：下游模型的定义/结构依赖上游的模型、假设或符号合同；只要求上游模型合同已批准。
-- `result_depends_on`：下游正式求解需要上游计算结果、估计参数、预测值、分类标签或其他数值产物；必须等待上游 `verify` 完成后再跑正式结果。
+- `model_depends_on`：下游模型定义/结构依赖上游模型、假设或符号合同，只要求上游模型合同批准。
+- `result_depends_on`：下游正式求解需要上游数值结果、估计参数、预测值或标签，必须等待上游 `verify` 完成。
 
-只有题面、数学接口或业务机制支持时才建立依赖；“题目未禁止”不构成复用证据。没有合理依赖时写空数组并保留理由。
+只有题面、数学接口或业务机制支持时才建立依赖；没有合理依赖时写空数组并保留理由。
 
-### Step 3: 关键变量统一编号 (30 min)
+### Step 3：关键变量统一编号（25 min）
 
-跨子问题统一符号 (anti_pattern B4: 符号重复定义):
-
-```
-全局变量表 (stage 4 会复制到论文)
+建立全局变量表：
 
 | 符号 | 含义 | 单位 | 类型 | 出现于 |
-|------|-----|------|------|-------|
-| x_i | 第 i 个产品的产量 | 件 | 决策变量 | Q1, Q2 |
-| p_i | 第 i 个产品的单价 | 元/件 | 参数 (附件 1) | Q1, Q3 |
-| α  | 折扣率 | 无量纲 | 参数 | Q3 |
-| ξ  | 需求随机扰动 | 件 | 随机变量 | Q3 |
-| ... |
-```
+|---|---|---|---|---|
+| `x_i` | 第 i 个决策量 | 件 | 决策变量 | Q1,Q2 |
+| `p_i` | 单价 | 元/件 | 参数 | Q1,Q3 |
 
-只收录在目标、约束、数据映射或验证中实际使用的变量；缺少必要变量要补齐，无用途变量要删除。
+只收录实际出现在目标、约束、数据映射或验证中的变量。无用途变量删除。
 
-### Step 4: 数据 schema 扫描 (30 min)
+### Step 4：数据 schema 扫描（25 min）
 
-用 pandas 快速扫附件:
+至少检查 shape、dtype、描述统计、缺失、异常口径和字段到模型变量的映射。扫描结果必须来自实际附件，不预填。
 
-```python
-import pandas as pd
-df = pd.read_excel("附件1.xlsx")
-print(df.shape)
-print(df.dtypes)
-print(df.describe())
-print(df.isnull().sum())
-```
+### Step 5：问题结构扫描（30–45 min）
 
-输出 schema 卡片:
-```
-附件 1 (xlsx):
-- 行数/列数: `<由扫描结果写入>`
-- 时间跨度: `<由原始字段计算>`
-- 缺失: `<列名、计数与比例；不得预填>`
-- 异常: `<检测口径与实际命中；不得预填>`
-- 与变量映射: p_i ← 列 "价格", d_i ← 列 "需求量"
-```
+在查看算法目录之前，对每个 Qi 逐项检查 `references/structural-innovation.md`：
 
-### Step 5: 子问题关系图 (15 min)
-
-以 mermaid / ASCII 表达，并给每条边标明依赖类型与接口:
-
-```
-Q1 (参数估计)
-  ↓ result: theta_hat, sigma_hat；需 Q1 verify
-Q2 (优化决策)
-
-Q1-model
-  ↓ model: 共享状态定义/符号合同
-Q3-model
-```
-
-写入 `decision_log.stages.2.decomposition`。
-
-### Step 6: 目标函数雏形 (30 min)
-
-每个 Qi 写出符号化目标 (不必完整,要框架):
-
-```
-Q1: max  Σ_i p_i * x_i  - C(x)
-    s.t. Σ_i x_i ≤ B (预算)
-         x_i ≥ 0, x_i ∈ Z
-
-Q2: 在 Q1 基础上加约束 K_i ≤ K_max
-
-Qi: <与该子问题匹配的符号化目标>
-    若使用上游结果或 warm start，注明接口、依赖类型与依据；否则保持独立
-```
-
-### Step 7: 输出移交 (5 min)
-
-写入 `decision_log.stages.2`:
 ```json
 {
-  "decomposition": [...],
-  "key_variables": [...],
-  "key_constraints": [...],
-  "objective_per_subproblem": {"<Qi>": "..."},
-  "data_schema": {...},
-  "subproblem_dependency": {
-    "Q1": {"model_depends_on": [], "result_depends_on": []},
-    "Q2": {"model_depends_on": [], "result_depends_on": ["Q1"]}
+  "Q1": {
+    "symmetry_or_invariance": [],
+    "eliminable_intermediates": [],
+    "separable_components": [],
+    "monotonicity_or_convexity": [],
+    "scale_separation": [],
+    "dimensionless_or_relative_form": [],
+    "coarse_to_fine_opportunity": [],
+    "search_space_reduction": [],
+    "mechanism_data_boundary": [],
+    "key_approximation_candidates": []
   }
 }
 ```
 
-旧版本的 `"Q2": ["Q1"]` 仍可读取，但按兼容规则同时解释为模型依赖与结果依赖；新项目必须使用上面的显式结构。
+每一项必须是：
 
----
+- 有题面/数学/数据依据的具体机会；或
+- `none: <为什么没有>`。
 
-## L1 Rubric (`rubrics.md` Stage 2)
+重点追问：
+
+- 能否减少自由度、消去难求中间量或改用相对/无量纲形式？
+- 是否有可分性、树/图结构、单调性、凸性、稀疏性、守恒量等可利用？
+- 是否能先用便宜近似定位区域，再精细求解？
+- 是否能剪枝、分块、松弛、局部化或多精度离散？
+- 已知机理应承担哪些部分，数据驱动只需补哪些未知项？
+- 是否存在解析解、上下界或 toy case 可作为数值基线？
+
+### Step 6：形成 innovation opportunities（15 min）
+
+只把有明确“观察 → 改变 → 预期收益 → 风险 → 证据需求”的结构机会写入候选：
+
+```json
+{
+  "id": "I1",
+  "subproblem": "Q3",
+  "type": "coarse_to_fine",
+  "observation": "...",
+  "proposed_change": "...",
+  "expected_benefit": "...",
+  "risk": "...",
+  "evidence_needed": "...",
+  "status": "candidate"
+}
+```
+
+没有合格候选时 `innovation_opportunities=[]`。不得为了数量填充。
+
+### Step 7：子问题关系图与目标函数雏形（25 min）
+
+用 Mermaid/ASCII 表示依赖并标接口，然后为每个 Qi 写符号化目标/约束骨架。若使用上游结果或 warm start，注明依赖类型与依据。
+
+### Step 8：输出移交
+
+写入 `decision_log.stages.2`：
+
+```json
+{
+  "decomposition": [],
+  "key_variables": [],
+  "key_constraints": [],
+  "objective_per_subproblem": {},
+  "data_schema": {},
+  "subproblem_dependency": {
+    "Q1": {"model_depends_on": [], "result_depends_on": []},
+    "Q2": {"model_depends_on": [], "result_depends_on": ["Q1"]}
+  },
+  "structure_scan": {},
+  "innovation_opportunities": []
+}
+```
+
+旧版 `"Q2": ["Q1"]` 仍兼容，但新项目必须显式区分两类依赖。
+
+## L1 Rubric
 
 | 维度 | 满分行为 |
-|------|---------|
-| 1. 子问题分解清晰度 | 每 Qi 卡片完整 |
-| 2. 关键变量识别 | 覆盖目标、约束与数据接口，标注类型，无占位变量 |
-| 3. 数学化程度 | 每 Qi 有目标雏形 |
-| 4. 数据契合度 | schema 已扫,变量映射清楚 |
-| 5. 子问题关联性 | 每个 Qi 的模型依赖、结果依赖或独立理由均已识别 |
-
----
+|---|---|
+| 子问题分解 | 每 Qi 输入/输出/约束/目标完整 |
+| 关键变量 | 覆盖实际模型所需项，无占位变量 |
+| 数学化 | 每 Qi 有数学对象、目标或关系骨架 |
+| 数据契合 | schema 已扫并与变量映射 |
+| 结构与依赖 | 依赖类型明确；结构扫描有依据或诚实记录 none |
 
 ## 常见坑
 
-- 题目仅读一次就开干 → 强制读 3 遍
-- 子问题间符号不统一 (B4) → 统一变量表
-- 附件数据没扫 → strictly 必做 Step 4
-- 为了“串起来”强行复用上游结果 (G1) → 只保留题面、数学或业务机制支持的依赖
-- 只让 Q2-model 依赖 Q1-model，却让 Q2-solve 在 Q1 数值结果核验前启动 → 有数值输入时必须写入 `result_depends_on`
-
----
+- 读一遍题就开始选算法；
+- 为了“串起来”强行依赖上游；
+- 看到“优化/预测”关键词就直接跳到 GA/LSTM；
+- 把“改进算法名”写成结构机会；
+- 强制每问找创新点；
+- 结构扫描只写术语，不说明它如何改变 formulation 或 solver。
 
 ## 退出条件
 
-1. 题面中的全部子问题卡片完整
-2. 全局变量表覆盖后续模型实际所需项且无凑数项
-3. 数据 schema 扫描完成
-4. 每个 Qi 的模型依赖、结果依赖或独立关系明确并有理由
-5. L1 rubric 全维 ≥7
+1. 全部子问题卡片完整；
+2. 全局变量表与数据 schema 完成；
+3. 模型依赖/结果依赖明确；
+4. 每个 Qi 完成 structure scan；
+5. innovation opportunities 只包含有依据、可证伪的候选，允许为空；
+6. L1 rubric 达到工作流阈值。
 
-→ 跳转 `stage_03_model_selection.md`
-
-拆解完成后启用 DAG 派单：`task_dag.py init --workspace <project>` 读取本阶段的 `subproblem_dependency` 生成任务图（见 team-workflow.md「DAG 派单模式」）。`model_depends_on` 连接到上游 model 节点，`result_depends_on` 连接到上游 verify 节点；后续调整用 replan，上游作废用 invalidate。
+拆解后启用 DAG 派单：`task_dag.py init --workspace <project>`。默认 `TQi-model` 必须读取本阶段的 `structure_scan` 和 innovation opportunities；只有某个候选值得验证时，才通过 `task_dag.py replan` 动态插入 baseline/proposed/compare 任务，不新增固定“创新阶段”。

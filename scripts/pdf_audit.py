@@ -2,6 +2,7 @@
 """Competition-aware PDF checks and page rendering; visual review is still needed."""
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -9,6 +10,10 @@ from pathlib import Path
 OVERFULL_RE = re.compile(r"Overfull \\hbox .*?\((?P<pt>\d+(?:\.\d+)?)pt too wide\)", re.I)
 UNDERFULL_RE = re.compile(r"Underfull \\hbox", re.I)
 VISUAL_REVIEW_CODES = {"sparse-text", "image-density", "overfull-hbox", "underfull-hbox"}
+
+
+def sha256(path: Path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def tex_log_issues(content: str):
@@ -42,6 +47,7 @@ def visual_review_passed(review: dict | None, issues=None) -> bool:
 def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110,
           visual_review: dict | None = None):
     import pymupdf
+    path = path.resolve()
     issues = []
     with pymupdf.open(path) as doc:
         texts = [p.get_text(sort=True) for p in doc]
@@ -118,9 +124,11 @@ def audit(path: Path, competition="cumcm", body_start=None, body_end=None, rende
             if not declarations or not refs or declarations[-1].start() > refs[-1].start():
                 issues.append({"severity": "review", "code": "ai-declaration", "detail": "Verify 2026 AI declaration heading before references"})
         log = path.with_suffix(".log")
+        log_record = None
         if log.exists():
             content = log.read_text(encoding="utf-8", errors="replace")
             issues.extend(tex_log_issues(content))
+            log_record = {"path": str(log.resolve()), "sha256": sha256(log)}
         has_error = any(x["severity"] == "error" for x in issues)
         if has_error:
             status = "failed"
@@ -128,7 +136,8 @@ def audit(path: Path, competition="cumcm", body_start=None, body_end=None, rende
             status = "passed"
         else:
             status = "needs_visual_review"
-        return {"pdf": str(path), "competition": competition, "total_pages": n,
+        return {"pdf": str(path), "pdf_sha256": sha256(path), "tex_log": log_record,
+                "competition": competition, "total_pages": n,
                 "counted_start": start, "counted_end": end, "counted_pages": count,
                 "limit": limit, "pages": pages, "issues": issues,
                 "visual_review": visual_review, "status": status}

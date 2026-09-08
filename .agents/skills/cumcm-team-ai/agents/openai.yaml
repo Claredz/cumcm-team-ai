@@ -1,4 +1,4 @@
 interface:
   display_name: "数模全流程 · 三人 AI 协作"
-  short_description: "覆盖读题建模、代码求解、论文编译、十阶段评分与三人自主协作"
-  default_prompt: "使用 $cumcm-team-ai，按当前赛题启动自主推进的建模、求解、验证与论文交付流程。"
+  short_description: "覆盖读题建模、代码求解、论文编译、十阶段评分、读题后 DAG 派单与三人自主协作"
+  default_prompt: "使用 $cumcm-team-ai，按当前赛题启动自主推进的建模、求解、验证与论文交付流程；读题拆解完成后按任务 DAG 派单。"

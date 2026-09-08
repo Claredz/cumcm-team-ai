@@ -38,6 +38,7 @@ description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电�
 完整命令见 [toolchain.md](references/toolchain.md)。语义理解和生成由当前 AI 执行，脚本负责确定性解析、状态、检查和渲染，不假称可自动求解任意赛题；不需要特定模型 API 密钥。
 
 - parse_problem.py：PDF/DOCX/Markdown/TXT 文本、分问候选、来源定位、CSV/Excel 概况和题型候选；扫描页标记待 OCR。AI 核对公式、分问和隐含约束后完善题目包。
+- task_dag.py：读题（Stage 2 拆解）完成后把任务组成有向无环图派给 A/B/C：init 生成骨架、board 出认领看板、done 需交叉复核回执与产物指纹、replan/invalidate 保留历史地调整结构和级联失效上游变化。
 - workflow.py：初始化、恢复、下一步、阶段完成与回退。阶段完成需实际文件摘要和检查记录，正式赛核心节点需真实人工复核，可集中进行。
 - score_artifact.py：L1 评分校验、加权、逐问聚合与日志持久化。L2 定向回检、L3 多视角、L4 经验校准见 feedback_layer*.md，按风险和时间选用。
 - render_paper.py：10 个 Markdown 章节→三赛事 LaTeX→PDF，支持 XeLaTeX/pdfLaTeX 及 Tectonic。--no-compile 只产生结构稿。
@@ -48,7 +49,7 @@ description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电�
 
 ## 三人、AI 和低干预协作
 
-A 管模型，B 管数据求解，C 管论证交付，可按能力调整。任务卡包括输入版本、可写范围、输出、验收、时限、负责人和复核人。默认建议 3 条产出线加可选只读检查线。同一文件单写者，主协调人写状态。实际子代理/外部任务遵守用户与环境授权，读取 skill 本身不创建新任务。
+A 管模型，B 管数据求解，C 管论证交付，可按能力调整。读题完成前按十阶段推进；Stage 2 拆解后切换为 DAG 派单：任务成图、就绪即认领、完成需交叉复核、上游变化级联失效并可重规划（见 team-workflow.md「DAG 派单模式」）。任务卡包括输入版本、可写范围、输出、验收、时限、负责人和复核人。默认建议 3 条产出线加可选只读检查线。同一文件单写者，主协调人写状态。实际子代理/外部任务遵守用户与环境授权，读取 skill 本身不创建新任务。
 
 少数真实人工节点：选题和核心假设、核心结果核验、最终作品。AI 先做成可检查产物再集中交接，不让人手工管理 JSON、命令和例行错误。遇可修复的 high issue 自动修复重跑；block 表示不放行错误产物，不等于停止所有工作。
 

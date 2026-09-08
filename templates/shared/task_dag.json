@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "dag_version": 1,
+  "created_from_stage": 2,
+  "_doc": "读题（Stage 2 拆解）完成后启用的任务派单图。task_dag.py init 从 subproblem_dependency 生成骨架，队伍通过 add/replan 调整。上游变化用 invalidate 级联标 stale，不删除历史。status: planned|in_progress|done|failed|stale|cancelled。done 需要复核人（≠负责人）的真实复核回执与产物 SHA256。",
+  "_role_doc": "A=模型与决策 B=数据与求解 C=论证与交付；映射到实际人名由队伍决定",
+  "tasks": [
+    {
+      "id": "TQ1-solve",
+      "title": "示例：Q1 实现与求解",
+      "subproblem": "Q1",
+      "stage_hint": 5,
+      "role": "B",
+      "reviewer": "A",
+      "deps": ["TQ1-model", "T0-datacheck"],
+      "writable_paths": ["src/Q1/", "runs/Q1/"],
+      "outputs": [{"path": "runs/Q1/", "interface": "结果表+日志+run_id"}],
+      "acceptance": "复现命令可跑、约束满足、误差在限",
+      "status": "planned",
+      "artifacts": [],
+      "history": []
+    }
+  ],
+  "events": []
+}

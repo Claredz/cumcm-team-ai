@@ -195,3 +195,5 @@ Qi: <与该子问题匹配的符号化目标>
 5. L1 rubric 全维 ≥7
 
 → 跳转 `stage_03_model_selection.md`
+
+拆解完成后启用 DAG 派单：`task_dag.py init --workspace <project>` 读取本阶段的 `subproblem_dependency` 生成任务图（见 team-workflow.md「DAG 派单模式」），三人从 `board` 就绪任务认领；后续建模/求解/写作按图推进，调整用 replan，上游作废用 invalidate。

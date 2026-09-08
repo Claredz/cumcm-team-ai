@@ -56,9 +56,9 @@ def dag_consistency(workspace: Path, stage: int | None = None):
     issues = []
     for task in tasks:
         gate = task.get("gate_stage")
-        status = task.get("status", "planned")
-        if gate is not None and gate <= current and status not in ("done", "cancelled"):
-            blocking.append({"id": task.get("id"), "gate_stage": gate, "status": status})
+        task_status = task.get("status", "planned")
+        if gate is not None and gate <= current and task_status not in ("done", "cancelled"):
+            blocking.append({"id": task.get("id"), "gate_stage": gate, "status": task_status})
     if blocking:
         issues.append("DAG has unfinished tasks required by the current/target stage")
 
@@ -165,6 +165,39 @@ def rollback(workspace: Path, stage: int, reason: str):
     return state
 
 
+def _has_nonempty(workspace: Path, rel: str) -> bool:
+    p = workspace / rel
+    if p.is_file():
+        return p.stat().st_size > 0
+    if p.is_dir():
+        return any(x.is_file() and x.stat().st_size > 0 for x in p.rglob("*"))
+    return False
+
+
+def evidence_stage(workspace: Path):
+    """Infer only that later-stage work exists; never auto-complete a stage.
+
+    This is intentionally conservative. It catches bookkeeping lag in autonomous runs
+    without fabricating receipts or human review.
+    """
+    signals = [
+        (1, "problem/", "problem files exist"),
+        (2, "state/problem-package.json", "parsed problem package exists"),
+        (2, "state/task_dag.json", "task DAG exists"),
+        (3, "models/", "model artifacts exist"),
+        (5, "src/", "implementation artifacts exist"),
+        (5, "results/", "result artifacts exist"),
+        (6, "runs/robustness/", "robustness artifacts exist"),
+        (8, "paper/", "paper source artifacts exist"),
+        (8, "paper_workspace/", "paper workspace contains files"),
+        (9, "delivery/", "delivery artifacts exist"),
+    ]
+    found = [{"stage": stage, "path": rel, "detail": detail}
+             for stage, rel, detail in signals if _has_nonempty(workspace, rel)]
+    highest = max((x["stage"] for x in found), default=0)
+    return highest, found
+
+
 def status(workspace: Path):
     state = load(workspace)
     wf = state.get("workflow", {})
@@ -184,9 +217,36 @@ def status(workspace: Path):
             "dag_consistency": dag_check}
 
 
+def reconcile(workspace: Path):
+    """Report state/DAG/artifact drift before an agent ends a work session.
+
+    Reconcile is read-only: it never forges a stage receipt, review, or completion event.
+    """
+    report = status(workspace)
+    highest, evidence = evidence_stage(workspace)
+    warnings = []
+    if highest > report["stage"]:
+        warnings.append({
+            "code": "bookkeeping-lag",
+            "detail": f"Workspace contains evidence reaching stage {highest}, but decision_log is at stage {report['stage']}. Complete missing stages with real receipts or rollback stale work.",
+        })
+    if report["changed_artifacts"]:
+        warnings.append({"code": "artifact-drift", "detail": "Previously completed artifacts changed; rollback and revalidate."})
+    if report["dag_consistency"]["issues"]:
+        warnings.append({"code": "dag-inconsistent", "detail": "; ".join(report["dag_consistency"]["issues"])})
+    report["reconcile"] = {
+        "evidence_stage": highest,
+        "evidence": evidence,
+        "warnings": warnings,
+        "ready": not warnings,
+        "note": "Read-only diagnostic; stage completion still requires a real passed receipt.",
+    }
+    return report
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("command", choices=["init", "status", "next", "complete", "rollback"])
+    ap.add_argument("command", choices=["init", "status", "next", "complete", "rollback", "reconcile"])
     ap.add_argument("--workspace", type=Path, required=True)
     ap.add_argument("--competition", choices=["cumcm", "mcm", "diangong"], default="cumcm")
     ap.add_argument("--year", type=int)
@@ -209,7 +269,8 @@ def main():
             if args.stage is None:
                 raise ValueError("rollback requires --stage")
             rollback(args.workspace, args.stage, args.reason)
-        print(json.dumps(status(args.workspace), ensure_ascii=False, indent=2))
+        result = reconcile(args.workspace) if args.command == "reconcile" else status(args.workspace)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, OSError, KeyError) as exc:
         ap.exit(2, f"Error: {exc}\n")
 

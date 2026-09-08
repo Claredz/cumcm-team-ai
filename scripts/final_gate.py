@@ -23,10 +23,19 @@ def sha256(path: Path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def resolve_workspace_file(workspace: Path, raw: str):
+    p = Path(raw)
+    if not p.is_absolute():
+        p = workspace / p
+    p = p.resolve()
+    root = workspace.resolve()
+    if not p.is_relative_to(root) or not p.is_file() or p.stat().st_size == 0:
+        raise ValueError(f"Missing/empty/outside-workspace file: {raw}")
+    return p
+
+
 def input_record(workspace: Path, rel: str):
-    p = (workspace / rel).resolve()
-    if not p.is_relative_to(workspace.resolve()) or not p.is_file() or p.stat().st_size == 0:
-        raise ValueError(f"Missing/empty final-gate input: {rel}")
+    p = resolve_workspace_file(workspace, rel)
     return {"path": str(p.relative_to(workspace.resolve())), "sha256": sha256(p)}
 
 
@@ -34,6 +43,24 @@ def read_json(workspace: Path, rel: str):
     rec = input_record(workspace, rel)
     data = json.loads((workspace / rec["path"]).read_text(encoding="utf-8"))
     return data, rec
+
+
+def bind_reported_file(workspace: Path, inputs: dict, issues: list, label: str,
+                       raw_path: str | None, expected_sha: str | None, code: str):
+    if not raw_path or not expected_sha:
+        issues.append({"severity": "error", "code": f"{code}-binding-missing",
+                       "detail": f"Audit report lacks path/hash binding for {label}"})
+        return
+    try:
+        p = resolve_workspace_file(workspace, raw_path)
+    except ValueError as exc:
+        issues.append({"severity": "error", "code": f"{code}-target-missing", "detail": str(exc)})
+        return
+    current = sha256(p)
+    inputs[label] = {"path": str(p.relative_to(workspace.resolve())), "sha256": current}
+    if current != expected_sha:
+        issues.append({"severity": "error", "code": f"{code}-target-drift",
+                       "detail": f"{inputs[label]['path']} changed after its audit"})
 
 
 def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
@@ -49,6 +76,9 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
     rec = workflow.reconcile(workspace)
     for warning in rec["reconcile"]["warnings"]:
         issues.append({"severity": "error", "code": f"workflow-{warning['code']}", "detail": warning["detail"]})
+    if rec.get("stage") != 9:
+        issues.append({"severity": "error", "code": "workflow-not-at-review-stage",
+                       "detail": f"Final gate must run at Stage 9; current stage={rec.get('stage')}"})
     dag_path = workspace / "state/task_dag.json"
     if dag_path.is_file():
         inputs["task_dag"] = input_record(workspace, "state/task_dag.json")
@@ -74,6 +104,19 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
         if citation.get("status") != "passed":
             issues.append({"severity": "error", "code": "citation-not-passed",
                            "detail": f"{citation_rel} status={citation.get('status')}"})
+        citation_files = citation.get("file_sha256")
+        if not isinstance(citation_files, list) or not citation_files:
+            issues.append({"severity": "error", "code": "citation-binding-missing",
+                           "detail": "Citation audit does not bind the paper sources to SHA256"})
+        else:
+            for idx, item in enumerate(citation_files):
+                bind_reported_file(workspace, inputs, issues, f"citation_source_{idx}",
+                                   item.get("path") if isinstance(item, dict) else None,
+                                   item.get("sha256") if isinstance(item, dict) else None,
+                                   "citation")
+        if citation.get("bibliography"):
+            bind_reported_file(workspace, inputs, issues, "citation_bibliography",
+                               citation.get("bibliography"), citation.get("bibliography_sha256"), "citation")
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         issues.append({"severity": "error", "code": "citation-audit-missing", "detail": str(exc)})
 
@@ -82,6 +125,12 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
         if pdf.get("status") != "passed":
             issues.append({"severity": "error", "code": "pdf-not-passed",
                            "detail": f"{pdf_rel} status={pdf.get('status')}"})
+        bind_reported_file(workspace, inputs, issues, "final_pdf",
+                           pdf.get("pdf"), pdf.get("pdf_sha256"), "pdf")
+        tex_log = pdf.get("tex_log")
+        if isinstance(tex_log, dict):
+            bind_reported_file(workspace, inputs, issues, "final_tex_log",
+                               tex_log.get("path"), tex_log.get("sha256"), "pdf-log")
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         issues.append({"severity": "error", "code": "pdf-audit-missing", "detail": str(exc)})
 

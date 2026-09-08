@@ -56,9 +56,9 @@ def dag_consistency(workspace: Path, stage: int | None = None):
     issues = []
     for task in tasks:
         gate = task.get("gate_stage")
-        status = task.get("status", "planned")
-        if gate is not None and gate <= current and status not in ("done", "cancelled"):
-            blocking.append({"id": task.get("id"), "gate_stage": gate, "status": status})
+        task_status = task.get("status", "planned")
+        if gate is not None and gate <= current and task_status not in ("done", "cancelled"):
+            blocking.append({"id": task.get("id"), "gate_stage": gate, "status": task_status})
     if blocking:
         issues.append("DAG has unfinished tasks required by the current/target stage")
 
@@ -91,6 +91,27 @@ def init(workspace: Path, competition: str, year: int, interaction="autonomous",
         (workspace / name).mkdir(parents=True, exist_ok=True)
     save(path, state)
     return state
+
+
+def require_final_gate(workspace: Path):
+    gate_path = workspace / "state/final-gate.json"
+    if not gate_path.is_file() or gate_path.stat().st_size == 0:
+        raise ValueError("Stage 9 requires state/final-gate.json from final_gate.py")
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    if gate.get("status") != "READY":
+        raise ValueError("Final quality gate is not READY")
+    for label, rec in gate.get("inputs", {}).items():
+        rel = rec.get("path")
+        expected = rec.get("sha256")
+        if not rel or not expected:
+            raise ValueError(f"Final gate input record is incomplete: {label}")
+        p = (workspace / rel).resolve()
+        if not p.is_relative_to(workspace.resolve()) or not p.is_file():
+            raise ValueError(f"Final gate input disappeared: {rel}")
+        current = hashlib.sha256(p.read_bytes()).hexdigest()
+        if current != expected:
+            raise ValueError(f"Final gate is stale; rerun after input changed: {rel}")
+    return gate
 
 
 def complete(workspace: Path, stage: int, receipt: dict):
@@ -137,6 +158,7 @@ def complete(workspace: Path, stage: int, receipt: dict):
             raise ValueError("Final compliance checks are incomplete")
         if state.get("compliance", {}).get("ai_usage") is None:
             raise ValueError("AI usage ledger is unconfirmed")
+        require_final_gate(workspace)
     record = {"at": now(), "artifacts": artifacts, "receipt": receipt}
     wf["completed"][str(stage)] = record
     wf["stale"] = [s for s in wf.get("stale", []) if s != stage]
@@ -165,6 +187,36 @@ def rollback(workspace: Path, stage: int, reason: str):
     return state
 
 
+def _has_nonempty(workspace: Path, rel: str) -> bool:
+    p = workspace / rel
+    if p.is_file():
+        return p.stat().st_size > 0
+    if p.is_dir():
+        return any(x.is_file() and x.stat().st_size > 0 for x in p.rglob("*"))
+    return False
+
+
+def evidence_stage(workspace: Path):
+    """Infer only strong evidence that work has reached a later stage.
+
+    Draft paper sources, trial models and ordinary result files are deliberately excluded:
+    they may legitimately appear early. This is a lag detector, not an auto-stage classifier.
+    """
+    signals = [
+        (2, "state/problem-package.json", "parsed problem package exists"),
+        (2, "state/task_dag.json", "task DAG exists"),
+        (6, "results/robustness/", "robustness artifacts exist"),
+        (6, "runs/robustness/", "robustness artifacts exist"),
+        (8, "paper_workspace/main.pdf", "compiled main PDF exists"),
+        (8, "paper_output/", "paper output artifacts exist"),
+        (9, "delivery/", "delivery artifacts exist"),
+    ]
+    found = [{"stage": stage, "path": rel, "detail": detail}
+             for stage, rel, detail in signals if _has_nonempty(workspace, rel)]
+    highest = max((x["stage"] for x in found), default=0)
+    return highest, found
+
+
 def status(workspace: Path):
     state = load(workspace)
     wf = state.get("workflow", {})
@@ -184,9 +236,36 @@ def status(workspace: Path):
             "dag_consistency": dag_check}
 
 
+def reconcile(workspace: Path):
+    """Report state/DAG/artifact drift before an agent ends a work session.
+
+    Reconcile is read-only: it never forges a stage receipt, review, or completion event.
+    """
+    report = status(workspace)
+    highest, evidence = evidence_stage(workspace)
+    warnings = []
+    if highest > report["stage"] + 1:
+        warnings.append({
+            "code": "bookkeeping-lag",
+            "detail": f"Workspace contains strong evidence reaching stage {highest}, but decision_log is at stage {report['stage']}. Complete missing stages with real receipts or rollback stale work.",
+        })
+    if report["changed_artifacts"]:
+        warnings.append({"code": "artifact-drift", "detail": "Previously completed artifacts changed; rollback and revalidate."})
+    if report["dag_consistency"]["issues"]:
+        warnings.append({"code": "dag-inconsistent", "detail": "; ".join(report["dag_consistency"]["issues"])})
+    report["reconcile"] = {
+        "evidence_stage": highest,
+        "evidence": evidence,
+        "warnings": warnings,
+        "ready": not warnings,
+        "note": "Read-only diagnostic; stage completion still requires a real passed receipt.",
+    }
+    return report
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("command", choices=["init", "status", "next", "complete", "rollback"])
+    ap.add_argument("command", choices=["init", "status", "next", "complete", "rollback", "reconcile"])
     ap.add_argument("--workspace", type=Path, required=True)
     ap.add_argument("--competition", choices=["cumcm", "mcm", "diangong"], default="cumcm")
     ap.add_argument("--year", type=int)
@@ -209,8 +288,9 @@ def main():
             if args.stage is None:
                 raise ValueError("rollback requires --stage")
             rollback(args.workspace, args.stage, args.reason)
-        print(json.dumps(status(args.workspace), ensure_ascii=False, indent=2))
-    except (ValueError, OSError, KeyError) as exc:
+        result = reconcile(args.workspace) if args.command == "reconcile" else status(args.workspace)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
         ap.exit(2, f"Error: {exc}\n")
 
 

@@ -2,13 +2,52 @@
 """Competition-aware PDF checks and page rendering; visual review is still needed."""
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
 
+OVERFULL_RE = re.compile(r"Overfull \\hbox .*?\((?P<pt>\d+(?:\.\d+)?)pt too wide\)", re.I)
+UNDERFULL_RE = re.compile(r"Underfull \\hbox", re.I)
+VISUAL_REVIEW_CODES = {"sparse-text", "image-density", "overfull-hbox", "underfull-hbox"}
 
-def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110):
+
+def sha256(path: Path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def tex_log_issues(content: str):
+    issues = []
+    for token in ["Missing character:", "Undefined control sequence", "undefined references"]:
+        if token in content:
+            issues.append({"severity": "error", "code": "tex-log", "detail": token})
+    overfull = [float(m.group("pt")) for m in OVERFULL_RE.finditer(content)]
+    if overfull:
+        worst = max(overfull)
+        severity = "error" if worst > 10 else "review"
+        issues.append({"severity": severity, "code": "overfull-hbox",
+                       "detail": f"{len(overfull)} Overfull \\hbox warnings; worst {worst:.1f}pt too wide"})
+    underfull = len(UNDERFULL_RE.findall(content))
+    if underfull:
+        issues.append({"severity": "review", "code": "underfull-hbox",
+                       "detail": f"{underfull} Underfull \\hbox warnings; inspect affected paragraphs"})
+    return issues
+
+
+def visual_review_passed(review: dict | None, issues=None) -> bool:
+    if not review or review.get("status") != "passed":
+        return False
+    if not all(review.get(k) for k in ("reviewer", "reviewed_at", "evidence")):
+        return False
+    unresolved_nonvisual = {i.get("code") for i in (issues or [])
+                            if i.get("severity") == "review" and i.get("code") not in VISUAL_REVIEW_CODES}
+    return not unresolved_nonvisual
+
+
+def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110,
+          visual_review: dict | None = None):
     import pymupdf
+    path = path.resolve()
     issues = []
     with pymupdf.open(path) as doc:
         texts = [p.get_text(sort=True) for p in doc]
@@ -85,15 +124,23 @@ def audit(path: Path, competition="cumcm", body_start=None, body_end=None, rende
             if not declarations or not refs or declarations[-1].start() > refs[-1].start():
                 issues.append({"severity": "review", "code": "ai-declaration", "detail": "Verify 2026 AI declaration heading before references"})
         log = path.with_suffix(".log")
+        log_record = None
         if log.exists():
             content = log.read_text(encoding="utf-8", errors="replace")
-            for token in ["Missing character:", "Undefined control sequence", "undefined references"]:
-                if token in content:
-                    issues.append({"severity": "error", "code": "tex-log", "detail": token})
-        return {"pdf": str(path), "competition": competition, "total_pages": n,
+            issues.extend(tex_log_issues(content))
+            log_record = {"path": str(log.resolve()), "sha256": sha256(log)}
+        has_error = any(x["severity"] == "error" for x in issues)
+        if has_error:
+            status = "failed"
+        elif visual_review_passed(visual_review, issues):
+            status = "passed"
+        else:
+            status = "needs_visual_review"
+        return {"pdf": str(path), "pdf_sha256": sha256(path), "tex_log": log_record,
+                "competition": competition, "total_pages": n,
                 "counted_start": start, "counted_end": end, "counted_pages": count,
                 "limit": limit, "pages": pages, "issues": issues,
-                "status": "failed" if any(x["severity"] == "error" for x in issues) else "needs_visual_review"}
+                "visual_review": visual_review, "status": status}
 
 
 def main():
@@ -104,11 +151,14 @@ def main():
     ap.add_argument("--body-end", type=int)
     ap.add_argument("--render-dir", type=Path)
     ap.add_argument("--dpi", type=int, default=110)
+    ap.add_argument("--visual-review", type=Path,
+                    help="JSON receipt with status=passed, reviewer, reviewed_at and evidence; only closes visual-only review codes")
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args()
     if not 40 <= a.dpi <= 600:
         ap.error("dpi must be 40..600")
-    report = audit(a.pdf, a.competition, a.body_start, a.body_end, a.render_dir, a.dpi)
+    visual = json.loads(a.visual_review.read_text(encoding="utf-8")) if a.visual_review else None
+    report = audit(a.pdf, a.competition, a.body_start, a.body_end, a.render_dir, a.dpi, visual)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"status": report["status"], "issues": len(report["issues"]), "output": str(a.output)}))

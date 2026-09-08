@@ -4,12 +4,16 @@
 
 - doctor.py：包结构、配置、阶段状态及本地依赖检查；--skip-tools 仅结构检查。
 - parse_problem.py：带来源定位的题面候选与附件字段提取。
-- workflow.py：十阶段 init/status/next/complete/rollback；实际产物摘要和回退记录。
+- workflow.py：十阶段 init/status/next/complete/rollback/reconcile；实际产物摘要、回退记录和收尾对账。reconcile 只读，不自动补 receipt。
+- task_dag.py：Stage 2 后的 DAG 派单、交叉复核、重规划、级联失效和写入域检查。
 - score_artifact.py：上游 Critic schema 验证、分数重算、逐问聚合、定向修补判定和持久化。原始分数须有证据，CLI 不调用模型。
 - extract_diff.py：章节补丁或统一差异应用，保留大段内容，拒绝陈旧上下文。
 - render_paper.py：编号 Markdown→三赛事模板→真实 PDF；--engine 可用 Tectonic 路径，--no-compile 为结构预览。
 - render_ai_usage.py：国赛 2026 声明位于参考文献前，无论使用/未使用均生成 AI工具使用声明.md；使用时另有详情 PDF。美赛报告写 11_ai_use_report.md；电工杯生成待核对的内部台账。
-- pdf_audit.py：赛事页数边界、缺字/溢出等检查、逐页渲染。
+- pdf_audit.py：赛事页数边界、缺字/占位、TeX Overfull/Underfull、元数据/密度检查和逐页渲染；自动检查无 error 后仍需真实 `--visual-review` 回执才返回 passed。
+- citation_audit.py：BibTeX/LaTeX/Pandoc 或编号参考文献与正文引用一致性检查；正文零引用、未定义引用为硬错误。
+- verify_independence.py：防“独立复算”直接 import/重跑被验实现的结构性门；不能替代数学上的独立性判断。
+- claim_registry.py：把 headline claim 绑定到 source/source_field、实现、验证器和独立性报告的 SHA256；check 会发现证据漂移。
 - prose_lint.py：中英表达建议和改写的受保护 token 差异，返回 2 代表需检查数字/公式/引用/否定变化。
 - corpus.py：官方展廊元数据索引、本地论文去重、提取 QA 和分组分位。
 - diagrams/check_overlap.py：从第一个仓库整合的 PDF 文字边界盒重叠/越界提示，运行 `python scripts/diagrams/check_overlap.py figure.pdf`；密集数学符号可能需人工解释。

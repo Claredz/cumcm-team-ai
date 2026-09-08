@@ -71,6 +71,9 @@ class WorkflowTests(unittest.TestCase):
         state["stages"]["9"]["compliance_checks"] = {k: True for k in state["stages"]["9"]["compliance_checks"]}
         state["compliance"]["ai_usage"] = []  # synthetic fixture, not a real no-use declaration
         workflow.save(self.root / "state/decision_log.json", state)
+        (self.root / "state/final-gate.json").write_text(
+            json.dumps({"status": "READY", "inputs": {}}), encoding="utf-8"
+        )  # synthetic workflow-only fixture; final_gate.py has separate integration tests
         workflow.complete(self.root, 9, self.receipt)
         self.assertTrue(workflow.status(self.root)["finished"])
 

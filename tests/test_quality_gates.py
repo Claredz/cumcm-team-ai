@@ -2,6 +2,7 @@
 """Regression tests for verification and bookkeeping gates."""
 from __future__ import annotations
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,8 @@ def load_script(name: str):
 
 pdf_audit = load_script("pdf_audit")
 citation_audit = load_script("citation_audit")
+verify_independence = load_script("verify_independence")
+claim_registry = load_script("claim_registry")
 workflow = load_script("workflow")
 
 
@@ -62,6 +65,57 @@ class CitationGateTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["undefined"], [])
             self.assertEqual(report["uncited"], [])
+
+
+class IndependenceGateTests(unittest.TestCase):
+    def test_direct_import_of_implementation_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            impl = root / "solver.py"
+            verifier = root / "verify.py"
+            impl.write_text("def solve(): return 1\n", encoding="utf-8")
+            verifier.write_text("import solver\nprint(solver.solve())\n", encoding="utf-8")
+            report = verify_independence.audit(verifier, impl)
+            self.assertEqual(report["status"], "failed")
+            self.assertTrue(any(i["code"] == "imports-implementation" for i in report["issues"]))
+
+    def test_independent_recomputation_passes_structural_guard(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            impl = root / "solver.py"
+            verifier = root / "verify.py"
+            impl.write_text("def solve(): return 1\n", encoding="utf-8")
+            verifier.write_text("value = sum([1])\nassert value == 1\n", encoding="utf-8")
+            report = verify_independence.audit(verifier, impl)
+            self.assertEqual(report["status"], "passed")
+
+
+class ClaimRegistryTests(unittest.TestCase):
+    def test_verified_claim_detects_source_drift(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            (workspace / "state").mkdir()
+            (workspace / "runs").mkdir()
+            (workspace / "src").mkdir()
+            source = workspace / "runs/result.json"
+            impl = workspace / "src/solver.py"
+            verifier = workspace / "src/verify.py"
+            indep = workspace / "runs/independence.json"
+            source.write_text('{"served_total":26850.57}', encoding="utf-8")
+            impl.write_text("def solve(): return 26850.57\n", encoding="utf-8")
+            verifier.write_text("assert abs(26850.57 - 26850.57) < 1e-9\n", encoding="utf-8")
+            indep.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+            claim_registry.register(
+                workspace, "q3.served_total", "26850.57", "person-times",
+                "runs/result.json", "served_total", status="verified",
+                implementation="src/solver.py", verifier="src/verify.py",
+                independence_report="runs/independence.json", paper_refs=["paper/Q3.md#result"],
+            )
+            self.assertEqual(claim_registry.check(workspace)["status"], "passed")
+            source.write_text('{"served_total":26850.62}', encoding="utf-8")
+            report = claim_registry.check(workspace)
+            self.assertEqual(report["status"], "failed")
+            self.assertTrue(any(i["code"] == "evidence-drift" for i in report["issues"]))
 
 
 class WorkflowReconcileTests(unittest.TestCase):

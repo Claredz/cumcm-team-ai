@@ -45,6 +45,8 @@ description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电�
 - render_ai_usage.py：真实台账导出；国赛参考文献前声明及详情 PDF，美赛 AI 报告，电工杯内部台账（提交位置按当届规定）。
 - pdf_audit.py：按赛事区分摘要/正文/附录/AI 报告计页，检查缺字、占位、元数据、图形密度和 TeX `Overfull/Underfull \\hbox`，渲染逐页 PNG。自动检查通过后仍需真实视觉复核；用 `--visual-review` 传实际复核回执后才可返回 passed。
 - citation_audit.py：检查 BibTeX/LaTeX/Pandoc 引用键或编号参考文献与正文引用的一致性；“有参考文献、正文零引用”和未定义引用直接失败，未引用文献默认要求复核。
+- verify_independence.py：独立复算的结构性防同源门，拒绝 verifier 与被验实现同文件/同内容、直接 import 或明显路径字面量重跑；通过不等于数学独立，仍需交叉复核。
+- claim_registry.py：把论文 headline claim 绑定到 source/source_field、实现、验证器、独立性报告及 SHA256；verified claim 缺证据或证据文件漂移时 `check` 失败，旧版本保留在 history。
 - prose_lint.py：中英表达建议及改写前后数字、公式、引用对照；不自动改原文，不宣称检测 AI 率。
 - corpus.py：本地论文导入、SHA256 去重、提取 QA、索引、按年/题型统计。data/papers/ 包含来源数据集和上游统计来源；全文不默认公开分发。
 

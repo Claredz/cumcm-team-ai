@@ -175,21 +175,18 @@ def _has_nonempty(workspace: Path, rel: str) -> bool:
 
 
 def evidence_stage(workspace: Path):
-    """Infer only that later-stage work exists; never auto-complete a stage.
+    """Infer only strong evidence that work has reached a later stage.
 
-    This is intentionally conservative. It catches bookkeeping lag in autonomous runs
-    without fabricating receipts or human review.
+    Draft paper sources, trial models and ordinary result files are deliberately excluded:
+    they may legitimately appear early. This is a lag detector, not an auto-stage classifier.
     """
     signals = [
-        (1, "problem/", "problem files exist"),
         (2, "state/problem-package.json", "parsed problem package exists"),
         (2, "state/task_dag.json", "task DAG exists"),
-        (3, "models/", "model artifacts exist"),
-        (5, "src/", "implementation artifacts exist"),
-        (5, "results/", "result artifacts exist"),
+        (6, "results/robustness/", "robustness artifacts exist"),
         (6, "runs/robustness/", "robustness artifacts exist"),
-        (8, "paper/", "paper source artifacts exist"),
-        (8, "paper_workspace/", "paper workspace contains files"),
+        (8, "paper_workspace/main.pdf", "compiled main PDF exists"),
+        (8, "paper_output/", "paper output artifacts exist"),
         (9, "delivery/", "delivery artifacts exist"),
     ]
     found = [{"stage": stage, "path": rel, "detail": detail}
@@ -225,10 +222,10 @@ def reconcile(workspace: Path):
     report = status(workspace)
     highest, evidence = evidence_stage(workspace)
     warnings = []
-    if highest > report["stage"]:
+    if highest > report["stage"] + 1:
         warnings.append({
             "code": "bookkeeping-lag",
-            "detail": f"Workspace contains evidence reaching stage {highest}, but decision_log is at stage {report['stage']}. Complete missing stages with real receipts or rollback stale work.",
+            "detail": f"Workspace contains strong evidence reaching stage {highest}, but decision_log is at stage {report['stage']}. Complete missing stages with real receipts or rollback stale work.",
         })
     if report["changed_artifacts"]:
         warnings.append({"code": "artifact-drift", "detail": "Previously completed artifacts changed; rollback and revalidate."})

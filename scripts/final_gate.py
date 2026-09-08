@@ -63,6 +63,45 @@ def bind_reported_file(workspace: Path, inputs: dict, issues: list, label: str,
                        "detail": f"{inputs[label]['path']} changed after its audit"})
 
 
+def validate_paper_innovation_claims(state: dict, claims_state: dict, issues: list):
+    """Stage 8 explicitly lists innovation claims used in prose.
+
+    This is intentionally explicit rather than heuristic text scanning: the writing
+    stage must declare every innovation claim it uses, and the final gate verifies
+    that the claim is registered, verified and bound to the cited paper location.
+    """
+    used = state.get("stages", {}).get("8", {}).get("innovation_claims_used", []) or []
+    if not isinstance(used, list):
+        issues.append({"severity": "error", "code": "innovation-usage-invalid",
+                       "detail": "stage.8.innovation_claims_used must be a list"})
+        return 0
+    claims = claims_state.get("claims", {})
+    valid = 0
+    for idx, item in enumerate(used):
+        if not isinstance(item, dict) or not item.get("claim_id") or not item.get("paper_ref"):
+            issues.append({"severity": "error", "code": "innovation-usage-invalid",
+                           "detail": f"innovation_claims_used[{idx}] needs claim_id and paper_ref"})
+            continue
+        cid = item["claim_id"]
+        pref = item["paper_ref"]
+        claim = claims.get(cid)
+        if not claim:
+            issues.append({"severity": "error", "code": "innovation-claim-unregistered", "claim_id": cid})
+            continue
+        if claim.get("kind", "headline") != "innovation":
+            issues.append({"severity": "error", "code": "innovation-claim-wrong-kind", "claim_id": cid})
+            continue
+        if claim.get("status") != "verified":
+            issues.append({"severity": "error", "code": "innovation-claim-unverified", "claim_id": cid})
+            continue
+        if pref not in claim.get("paper_refs", []):
+            issues.append({"severity": "error", "code": "innovation-paper-ref-unbound", "claim_id": cid,
+                           "detail": f"{pref} is not registered in claim.paper_refs"})
+            continue
+        valid += 1
+    return valid
+
+
 def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
                pdf_rel="state/pdf-audit-final.json"):
     issues = []
@@ -84,13 +123,14 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
         inputs["task_dag"] = input_record(workspace, "state/task_dag.json")
 
     claims_path = workspace / "state/claims.json"
+    claims_state = {"claims": {}}
     if not claims_path.is_file():
-        issues.append({"severity": "error", "code": "claims-missing", "detail": "state/claims.json is required for final headline-value provenance"})
+        issues.append({"severity": "error", "code": "claims-missing", "detail": "state/claims.json is required for final claim provenance"})
     else:
         inputs["claims"] = input_record(workspace, "state/claims.json")
         claims_state = claim_registry.load(workspace)
         if not claims_state.get("claims"):
-            issues.append({"severity": "error", "code": "claims-empty", "detail": "No active headline claims are registered"})
+            issues.append({"severity": "error", "code": "claims-empty", "detail": "No active paper claims are registered"})
         provisional = sorted(k for k, v in claims_state.get("claims", {}).items() if v.get("status") != "verified")
         if provisional:
             issues.append({"severity": "error", "code": "claims-unverified", "claims": provisional})
@@ -98,6 +138,9 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
         for issue in checked["issues"]:
             issues.append({"severity": "error", "code": f"claim-{issue.get('code')}", "detail": issue.get("detail", ""),
                            "claim_id": issue.get("claim_id")})
+
+    state = workflow.load(workspace)
+    valid_innovations = validate_paper_innovation_claims(state, claims_state, issues)
 
     try:
         citation, inputs["citation_audit"] = read_json(workspace, citation_rel)
@@ -134,7 +177,6 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         issues.append({"severity": "error", "code": "pdf-audit-missing", "detail": str(exc)})
 
-    state = workflow.load(workspace)
     checks = state.get("stages", {}).get("9", {}).get("compliance_checks", {})
     missing_checks = sorted(k for k, v in checks.items() if v is not True)
     if missing_checks:
@@ -144,10 +186,20 @@ def build_gate(workspace: Path, citation_rel="state/citation-audit.json",
                        "detail": "compliance.ai_usage is null/missing"})
 
     status = "BLOCKED" if issues else "READY"
-    return {"status": status, "generated_at": now(), "inputs": inputs, "issues": issues,
-            "summary": {"workflow_ready": rec["reconcile"]["ready"],
-                        "active_claims": len(claim_registry.load(workspace).get("claims", {})) if claims_path.is_file() else 0,
-                        "compliance_checks": checks}}
+    active_claims = claims_state.get("claims", {}) if claims_path.is_file() else {}
+    return {
+        "status": status,
+        "generated_at": now(),
+        "inputs": inputs,
+        "issues": issues,
+        "summary": {
+            "workflow_ready": rec["reconcile"]["ready"],
+            "active_claims": len(active_claims),
+            "verified_innovation_claims_used": valid_innovations,
+            "registered_innovation_claims": sum(1 for c in active_claims.values() if c.get("kind", "headline") == "innovation"),
+            "compliance_checks": checks,
+        },
+    }
 
 
 def main():

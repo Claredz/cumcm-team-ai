@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {"repository": "LEEHAHAHAHA/math-modeling-skill", "commit": "40aaf43482891ae81a6313d758a4ddf892f81b16", "license": "MIT; separate cumcmthesis class excluded", "destination": ["references/production", "templates/diagrams", "scripts/diagrams"]},
+    {"repository": "handsomeZR-netizen/mathmodel-skill", "commit": "d3941e14d8693fb4a79948e59afff3098734127e", "license": "MIT", "destination": ["references", "competitions", "config", "templates", "scripts", "tests"]},
+    {"repository": "blader/humanizer", "commit": "9862685f575c65a8247f90369951df1b3416e3d6", "license": "MIT", "destination": ["references/style/humanizer-en.md"]},
+    {"repository": "op7418/Humanizer-zh", "commit": "91f3d394db8419c20d67ebe22a96cf8fee0a404b", "license": "MIT", "destination": ["references/style/humanizer-zh.md"]},
+    {"repository": "btford/write-good", "commit": "6940b034c6f5a7e101c01a24d651a778fc3fe435", "license": "MIT", "destination": ["references/style/write-good.md"]}
+  ],
+  "material_scope": "Actual imported source snapshots; paper metadata/derived statistics do not license full texts"
+}

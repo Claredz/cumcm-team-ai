@@ -1,4 +1,4 @@
 interface:
-  display_name: "国赛三人 AI 协作"
-  short_description: "面向数模国赛的三人分工、并行核验、规则核查与休息安排"
-  default_prompt: "使用 $cumcm-team-ai，按队员能力规划国赛备赛与三人 AI 并行协作。"
+  display_name: "数模全流程 · 三人 AI 协作"
+  short_description: "覆盖读题建模、代码求解、论文编译、十阶段评分与三人自主协作"
+  default_prompt: "使用 $cumcm-team-ai，按当前赛题启动自主推进的建模、求解、验证与论文交付流程。"

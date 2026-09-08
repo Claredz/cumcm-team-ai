@@ -42,7 +42,7 @@ models/                   假设、符号、接口
 src/                      可运行实现
 runs/<run-id>/            参数、日志、结果、图表
 paper/                    主稿与章节
-state/team-state.json     总协调人写，其他人提出变更
+state/decision_log.json   v2 唯一主状态，总协调人写
 tasks/<task-id>/           任务卡与交接
 logs/ai/                  实际使用记录，内部原始记录分开保存
 delivery/                 冻结文件

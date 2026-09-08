@@ -26,7 +26,9 @@ next: stage_04_foundation
 
 为每个子问题先确定问题表示与 mathematical formulation，再选择模型族和 solver。必须消费 Stage 2 的 `structure_scan`，并遵守 `modeling-constitution.md`；不能从题型关键词直接跳到算法目录。
 
-默认顺序：
+兼容性简写保持为：`structure → representation/formulation → approximation/decomposition → solver/algorithm`。
+
+更完整的默认顺序是：
 
 `problem contract → structure → simplest formulation → baseline → diagnose → approximation/decomposition → model family → solver/algorithm`
 

@@ -12,6 +12,15 @@ def sha256(path: Path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _literal_refers_to_impl(value: str, impl_name: str, impl_stem: str) -> bool:
+    """Catch path/module literals without flagging prose that merely mentions a solver."""
+    raw = value.strip().replace("\\", "/")
+    if raw in {impl_name, impl_stem}:
+        return True
+    tail = raw.rsplit("/", 1)[-1]
+    return tail == impl_name or tail == impl_stem or tail == f"{impl_stem}.py"
+
+
 def audit(verifier: Path, implementation: Path):
     issues = []
     vr = verifier.resolve()
@@ -46,10 +55,10 @@ def audit(verifier: Path, implementation: Path):
         issues.append({"severity": "error", "code": "imports-implementation", "imports": suspicious_imports,
                        "detail": "Verifier directly imports the implementation under test"})
 
-    suspicious_strings = sorted({s for s in string_literals if impl_name in s or impl_stem in Path(s).stem})
+    suspicious_strings = sorted({s for s in string_literals if _literal_refers_to_impl(s, impl_name, impl_stem)})
     if suspicious_strings:
         issues.append({"severity": "error", "code": "references-implementation-path",
-                       "detail": "Verifier contains a literal reference to the implementation path/name",
+                       "detail": "Verifier contains a literal module/path reference to the implementation under test",
                        "literals": suspicious_strings[:10]})
 
     if any(i["severity"] == "error" for i in issues):

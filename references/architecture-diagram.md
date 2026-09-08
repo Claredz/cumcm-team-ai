@@ -32,7 +32,7 @@
 
 ## 4. 构建与核验
 
-在项目目录复制模板后修改标签：
+Linux / WSL2：
 
 ```bash
 cp <skill>/templates/diagrams/architecture.tex <project>/paper_workspace/figures/architecture.tex
@@ -41,7 +41,18 @@ xelatex -interaction=nonstopmode -halt-on-error architecture.tex
 python <skill>/scripts/diagrams/check_overlap.py architecture.pdf
 ```
 
-若环境有 `pdftoppm` / `pdftocairo`，可另外导出 PNG/SVG 预览。PDF 矢量版本优先嵌入论文。
+Windows PowerShell：
+
+```powershell
+Copy-Item <skill>\templates\diagrams\architecture.tex <project>\paper_workspace\figures\architecture.tex
+Set-Location <project>\paper_workspace\figures
+xelatex -interaction=nonstopmode -halt-on-error architecture.tex
+python <skill>\scripts\diagrams\check_overlap.py architecture.pdf
+```
+
+`<skill>` / `<project>` 是文档占位符，实际运行时由 agent 或队员替换成真实路径；路径含空格时使用引号。自动化流程优先直接调用 Python/TeX 可执行文件，不要求 Git Bash。
+
+若环境有 `pdftoppm` / `pdftocairo`，可另外导出 PNG/SVG 预览；没有这些工具也不阻断主流程。PDF 矢量版本优先嵌入论文。
 
 构建后至少检查：
 

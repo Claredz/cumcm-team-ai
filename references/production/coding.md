@@ -1,167 +1,135 @@
-# 阶段 3-4:代码实现与求解
+# 阶段 3-4：代码实现与求解
 
-> v2 适配：本页为导入参考。执行前以根 SKILL.md 和 references/integration-policy.md 为准：默认自主推进，普通修错不等待确认；固定图数/字数只作建议；赛事规则与 AI 披露以当前比赛包为准。旧问答示例仅用于 guided 模式。
+> v3 适配：执行前以根 `SKILL.md`、`modeling-constitution.md` 和 `integration-policy.md` 为准。核心是：**真实输入 + 可复现路径 + 增量纠错 + 代码/论文一致**。固定图数和个人绝对路径不再作为硬要求。
 
-代码是论文的底气。论文里每个数字都要能在代码里复现,代码与论文口径必须完全一致。本阶段的核心是:**真实数据 + 可复现 + 增量纠错**。
+## 1. 数据真实性红线
 
-## 1. 防伪数据红线(最严重的失分项之一)
+不得用未标注的合成数据替代题目提供的真实数据。以下行为直接视为高风险：
 
-**红线**:严禁用 `np.random`/`random` 生成模拟数据却未读取真实数据文件。
+- 题目给了附件，却在正式求解代码里完全不读取附件；
+- 自行生成随机样本并把结果当作真实观测；
+- 假设不存在的 `data.csv`、列名或单位；
+- 为了让模型跑通而默默补造标签。
 
-智能体会自动检测"假数据"信号:
-- 代码含 `np.random` / `random.rand` / `random.normal`
-- 且未引用任何真实数据文件名
+随机数本身不是错误。蒙特卡洛、bootstrap、随机重启、仿真、交叉验证拆分和测试夹具都可以使用随机数，但必须说明用途、设置随机种子，并与真实输入边界区分。
 
-命中即触发纠错循环,强制改为读取真实数据文件。
+## 2. 路径规则：可复现优先，不硬编码个人绝对路径
 
-**写码硬性要求(必须传达给编程手)**:
-
-```
-1. 必须用 pandas.read_excel / read_csv / openpyxl 读取上面列出的真实数据文件(用其绝对路径);
-2. 严禁生成随机数或模拟数据(np.random、random 等),严禁假设文件名为 data.csv;
-3. 结果写入当前脚本目录的 results/ 子目录,关键数字 print 出来;
-4. 用 matplotlib 绘制至少 5 张可视化图,保存到 results/ 子目录:
-   - 各图表达意思互不重复,覆盖中间求解过程、最终结果、关键指标对比、趋势等;
-   - 图片文件名必须非常详细、能直接识别内容,格式「Q{题号}_{内容描述}_{图表类型}.png」(如 Q1_各赛季观众数时序折线图.png),严禁 fig1.png/result.png 这类无意义命名(详见 visualization.md 第 9 节);
-   - 用 plt.savefig 保存;含中文时先设置字体(见 visualization.md 第 3 节的 font.family 列表配方,不要只用 font.sans-serif);
-   - 每张图有标题与坐标轴标签,figsize 宽大于高(如 (8,5))。
-```
-
-## 2. 数据文件绝对路径传递
-
-编程手必须用**绝对路径**读取数据,不能假设文件名为 `data.csv`。上下文里要明确列出:
-
-```
-数据文件(必须用绝对路径读取):
-- 绝对路径:/abs/path/02_data/附件1.xlsx(文件名:附件1.xlsx)
-- 绝对路径:/abs/path/02_data/附件2.csv(文件名:附件2.csv)
-
-数据结构:
-附件1.xlsx[Sheet1]: 列=['日期','场馆','观众数'], 行数=1000
-附件2.csv: CSV, 列=['队名','胜场','负场'], 数据行数=20
-```
-
-## 3. 求解代码上下文模板
-
-每问的完整上下文(所有纠错轮次共享,保证修复时也能看到问题/方案/数据):
-
-```
-问题 Q{idx}:{rephrased}(类型:{type})
-选定建模方案:
-{chosen_json}
-
-数据文件(必须用绝对路径读取):
-{data_files_text}
-
-数据结构:
-{data_overview}
-
-{hard_reqs}
-```
-
-## 4. 写码 → 运行 → Search-Replace 纠错迭代
-
-### 4.1 首版:完整代码
-首版要求完整输出可运行 Python 代码。输出 JSON:
-```json
-{"code": "完整的 Python 代码(用真实换行与缩进)"}
-```
-
-**思考模型陷阱**:若编程手配置的是推理/思考模型(如 deepseek-v4-flash、reasoner),写代码时内容会落入 `reasoning_content` 导致 `content` 为空。此时需把编程手模型改为非思考模型(如 deepseek-chat)。
-
-### 4.2 运行 + 纠错:Search-Replace 增量修复
-**禁止重写全文**。只修复出错部分,避免长代码截断/为空。
-
-输出 JSON:
-```json
-{
-  "edits": [
-    {
-      "search": "代码中真实存在的原文片段(精确复制,含缩进与换行)",
-      "replace": "替换后的代码"
-    }
-  ]
-}
-```
-
-**Search-Replace 三级匹配策略**(从严格到宽松,命中即止,借鉴 Aider):
-
-1. **精确匹配**(逐字符):`search in content` → 替换第一处。
-2. **压缩空白后精确匹配**:对每行压缩空白(去缩进、压行内空格)再匹配,容忍缩进偏移、多/少空格、行尾空白。
-3. **difflib 模糊匹配**(相似度 ≥ 0.6):处理行内容个别字符的细微差异。首尾行须压缩后一致,避免改错位置。
-
-每个 edit 只替换第一处匹配。失败列表反馈给 LLM 重试(把"哪些 search 没匹配上"明确告知)。
-
-### 4.3 假数据检测(运行成功后)
-即使代码运行成功,若 `_looks_fake(code, data_files)` 为真(含随机数且未读真实文件),视为无效,触发纠错:
+正式脚本通过 `--workspace`、config 或 data manifest 从项目根定位文件。推荐：
 
 ```python
-def _looks_fake(code: str, data_files: list) -> bool:
-    uses_random = ("np.random" in code) or ("random.rand" in code) or ("random.normal" in code)
-    if not uses_random:
-        return False
-    names = [getattr(f, "name", str(f)) for f in data_files]
-    reads_real = any(n in code for n in names)
-    return not reads_real
+from pathlib import Path
+import argparse
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[1])
+args = ap.parse_args()
+root = args.workspace.resolve()
+data_file = root / "data" / "raw" / "附件1.xlsx"
+result_dir = root / "runs" / "Q1"
+result_dir.mkdir(parents=True, exist_ok=True)
 ```
 
-### 4.4 纠错上限
-每问最多 10 轮纠错。同一问题连续 2 轮仍不过,停下来换思路,如实告知用户。
+运行时可以把 `data_file.resolve()` 写进日志用于诊断；但不得把 `/home/name/...`、`C:\\Users\\name\\...` 写死进最终脚本、论文或支撑材料。
 
-## 5. 可复现清单
+如果项目结构不是固定 `data/raw`，将真实相对路径写入 manifest，例如：
 
-每个 `solve.py` 必须满足:
-
-- [ ] 用绝对路径读取真实数据文件
-- [ ] 无模拟数据(或随机数仅用于算法本身如重启,且读真实数据)
-- [ ] 关键数字 `print` 出来(供论文引用与重跑核对)
-- [ ] 结果写入 `results/` 子目录(CSV + 图片)
-- [ ] 至少 5 张可视化图,各图意思不重复
-- [ ] 图片文件名详细可识别内容(`Q{题号}_{内容}_{图表类型}.png`,无 fig1.png)
-- [ ] 含中文先设字体(见 `visualization.md` 第 3 节 font.family 列表配方)
-- [ ] figsize 宽大于高(如 (8,5))
-- [ ] 设随机种子(若算法含随机性,`np.random.seed(42)`)
-- [ ] 脚本可独立运行(`python solve.py`),无外部依赖文件路径
-
-## 6. 求解汇总提炼
-
-求解完成后,从各问运行输出提炼"求解汇总",供论文手直接引用:
-
-```
-prompt:
-以下是各问求解代码的运行输出,请提炼每问的关键数字与结论,生成「求解汇总」(供论文写作直接引用)。
-{summary_input}
-
-输出要求:逐问列出,格式「Q1:关键数字 + 结论」,语言简洁准确,只写汇总本身。
+```json
+{"files":[{"id":"attachment_1","path":"data/raw/附件1.xlsx","sha256":"..."}]}
 ```
 
-落 `04_solving/solve_summary.md` 和 `solve_summary.json`。
+求解脚本按 id 读取。这样工作区换机器仍可复现。
 
-**踩坑教训**:
-- 汇总失败不阻断流程,论文手仍可用 stdout 原文。
-- 汇总里的关键数字会被论文手写进摘要,必须与代码运行结果完全一致(审稿时会核对)。
+## 3. 求解上下文
 
-## 7. 代码—论文一致(交付前必查)
+每问的执行上下文至少包含：
 
-- 论文每个公式 → 代码里有对应实现,变量名/表达式对得上
-- 论文描述的方法细节(初始化、贪心策略、局部搜索邻域、重启次数、停止条件、随机种子)→ 与代码实际行为一致
-- 论文引用的每个关键数值(目标值、指标、改善率)→ **重跑脚本可复现**
-- 附录代码与交付的支撑材料代码是**同一份**(论文用 `\lstinputlisting` 自动加载最终代码,不手抄)
-- 命名/单位/口径在四处统一:论文正文、代码、结果 CSV、README
-
-自动核对手段:
-```bash
-diff <(sed -n '/lstinputlisting/,/^}/p' main.tex) 支撑材料/代码/*.py   # 附录与交付代码一致
-python solve.py | tee run.log                                           # 重跑核对关键数字
-grep -E "关键数字|目标值" run.log                                         # 比对论文数字
+```text
+问题 Q{idx}: {rephrased}
+题目契约: 输出、单位、官方定义、约束
+最终 formulation: {chosen_formulation}
+结构决策: adopted/rejected opportunities
+真实数据 manifest: {relative paths + schema + units + hashes when frozen}
+baseline / proposed: {if any}
+acceptance: {constraints, metrics, sanity checks}
 ```
 
-## 8. 求解交付清单
+不要只给编程手一个算法名。
 
-- [ ] 每问 `Q{n}/solve.py` 可独立运行
-- [ ] 用绝对路径读取真实数据,无假数据
-- [ ] `results/` 下 ≥5 张图 + 结果 CSV
-- [ ] 关键数字 print 出来
-- [ ] `solve_summary.md` 已提炼
-- [ ] 设随机种子(若算法含随机)
-- [ ] 代码与论文口径一致
+## 4. 写码 → 运行 → 增量修复
+
+首版代码应完整可运行。后续报错优先 Search-Replace / 局部编辑，不反复重写整个长文件，避免把已经正确的部分改坏。
+
+推荐修复顺序：
+
+1. 复现错误并保存 stdout/stderr；
+2. 定位最小失败位置；
+3. 只改相关函数/参数/路径；
+4. 重跑原 case；
+5. 再跑 regression/sanity case；
+6. 若同一故障连续出现，回到 formulation/数据假设检查，而不是无限 patch。
+
+不使用固定“10 轮必停”作为竞赛规则；按剩余时间、故障重复性和风险决定是否换思路。
+
+## 5. 每个 solve task 的可复现清单
+
+- [ ] 读取真实 data manifest / workspace-relative 文件；
+- [ ] 输入 schema、单位、缺失处理有记录；
+- [ ] 随机性有用途说明与 seed；
+- [ ] 配置、模型参数、solver status 与运行环境进入 run log；
+- [ ] 关键结果写入机器可读 JSON/CSV，而不是只 print；
+- [ ] headline number 能被 `claim_registry.py` 绑定到 source field；
+- [ ] 需要的图来自同一 run 结果，不重新手工造数字；
+- [ ] 代码可由新的工作区路径重跑；
+- [ ] 约束、量纲、边界或解析/toy sanity check 通过。
+
+图的数量由论文信息需求决定。每张图应回答不同问题；没有信息价值的图不因“至少 5 张”而生成。
+
+## 6. 结果组织
+
+推荐每问：
+
+```text
+runs/Q1/<run_id>/
+  config.json
+  stdout.log
+  metrics.json
+  result.csv
+  figures/
+  environment.json
+```
+
+论文使用的关键数值进入 claim registry；DAG receipt 记录产物和 SHA。需要人工阅读的 `solve_summary.md` 可以从机器可读结果生成，但 summary 不是权威数值源。
+
+## 7. baseline 与创新实验
+
+如果 Stage 3 插入 baseline/proposed：
+
+- 使用相同输入切分、约束口径和评价指标；
+- 记录 wall time、solver status、objective/误差、可行率和必要的资源信息；
+- 不为了让 proposed 好看而给 baseline 更差超参数或更小预算；
+- coarse-to-fine、剪枝、解耦等结构创新要额外记录 guard/failure test；
+- 若 proposed 没有优势，保留结果并撤销创新表述。
+
+## 8. 独立复算与代码—论文一致
+
+关键结果不能只通过“再运行同一函数一次”验证。由不同角色/脚本按 `verification.md` 和 `verify_independence.py` 做结构独立复核。
+
+交付前核对：
+
+- 论文公式 ↔ 实现；
+- 初始化、邻域、停止条件、随机种子 ↔ 实际代码；
+- 摘要/正文/表格的关键数字 ↔ claim registry/source field；
+- 单位与口径 ↔ 题目契约；
+- 附录/支撑材料 ↔ 最终运行代码，不手抄旧版本；
+- 数据文件相对路径与 README/manifest 一致。
+
+## 9. 求解交付清单
+
+- [ ] 每个必要 `solve.py`/notebook 可按 README 命令运行；
+- [ ] 无未标注假数据；
+- [ ] 无个人机器硬编码路径；
+- [ ] 关键结果有机器可读源和 run log；
+- [ ] 关键 claim 已验证；
+- [ ] 图表与正文数字来自同一冻结 run；
+- [ ] 上游变化后相关 DAG task 已 invalidate/recompute。

@@ -7,8 +7,10 @@ inputs:
 outputs:
   - "stage.3.{candidate_formulations, candidate_models, selected_per_subproblem, rejection_log, toy_demos_passed, innovation_decisions, red_team, model_family_consistency}"
 loads_reference:
+  - "references/modeling-constitution.md"
   - "references/structural-innovation.md"
-  - "references/model_catalog.md"
+  - "references/production/modeling.md"
+  - "references/model_catalog.md (on demand after formulation)"
   - "references/rubrics.md§Stage_3"
   - "competitions/<comp>/winning_patterns.md§4"
 loads_template: ["templates/shared/code_starter/<problem_type>.py"]
@@ -16,113 +18,71 @@ feedback: ["L1", "counterfactual_exploration_in_championship"]
 next: stage_04_foundation
 ---
 
-# Stage 3 — 从问题结构到模型与求解器
-
-> v2 适配：本页为导入参考。执行前以根 SKILL.md 和 references/integration-policy.md 为准。默认自主推进；模型复杂度和算法数量不是质量代理。
+# Stage 3 — 从问题结构到 formulation，再到模型与求解器
 
 **时长**: 2-3h | **反馈层**: L1 + 反事实探索
 
 ## 目标
 
-为每个子问题先确定**问题表示与 mathematical formulation**，再选择模型族和 solver。必须消费 Stage 2 的 `structure_scan`，不能直接从关键词跳到算法目录。
+为每个子问题先确定问题表示与 mathematical formulation，再选择模型族和 solver。必须消费 Stage 2 的 `structure_scan`，并遵守 `modeling-constitution.md`；不能从题型关键词直接跳到算法目录。
 
 默认顺序：
 
-`structure → representation/formulation → approximation/decomposition → solver/algorithm`
+`problem contract → structure → simplest formulation → baseline → diagnose → approximation/decomposition → model family → solver/algorithm`
 
-创新优先发生在问题表示、结构利用和求解策略层；标准模型若最适合，就使用标准名称。
-
-## 产出
-
-- 每个 Qi 的结构处理决定：哪些机会 adopted/rejected，为什么；
-- 候选 formulation 与合理替代；
-- 主模型、求解器与选型理由；
-- 最小可执行 toy demo；
-- 若采用结构创新候选，则产生可验证的 baseline/proposed 计划；
-- championship 模式的 red-team 证据。
+复杂模型只有在简单 baseline 的具体缺陷被证据量化后才升级。创新优先发生在问题表示、结构利用和求解策略层；标准模型若最适合，就使用标准名称。
 
 ## 操作流程
 
-### Step 0：先读 structure scan
+### Step 0：锁定题目契约和 structure scan
 
-对 Stage 2 每个结构机会逐项做：
+逐项确认输出、单位、题面公式/约束和 Stage 2 结构机会。每个 innovation opportunity 做 `adopt for testing / reject`，记录依据、风险和需要的 baseline/guard。没有结构机会是合法结果。
 
-```text
-I1: candidate → adopt for testing / reject
-依据: ...
-若采用，它改变的是：变量 / 约束 / 可行域 / 分解 / 求解策略 / 数据机理边界
-风险: ...
-需要的 baseline/guard: ...
-```
-
-`candidate` 不是论文创新点。没有值得采用的机会时正常进入标准模型选择。
-
-### Step 1：先问能否解析、化简或重参数化
+### Step 1：构造最简单可行 formulation
 
 在打开算法目录前依次检查：
 
-1. 是否存在解析关系、守恒量、上下界、单调性、凸性或对称性？
-2. 是否有中间量可以消去，或通过无量纲化/相对量简化？
+1. 是否有解析关系、守恒量、上下界、单调性、凸性或对称性？
+2. 是否有中间量可以消去，或通过无量纲化/相对量/重参数化简化？
 3. 是否可以分块、解耦、松弛或按图/树结构局部计算？
-4. 是否能使用 coarse-to-fine、剪枝、局部化或 warm start 缩小求解域？
-5. 已知机理与数据驱动的边界在哪里？如果使用 ML，是否更适合拟合 residual/unknown term？
+4. 是否能 coarse-to-fine、剪枝、局部化或 warm start 缩小求解域？
+5. 已知机理与数据驱动边界在哪里？是否适合 grey-box？
 
-这些检查形成 `candidate_formulations`，而不是先形成算法名单。
+形成 `candidate_formulations`，而不是算法名单。
 
-### Step 2：候选 formulation 比较
+### Step 2：先建立 baseline，再证明是否需要升级
 
-每个候选记录：
+baseline 应是公平、简单、可复现且能回答相同任务的方案。记录其误差、残差、可行率、运行时间、边界失败或业务缺陷。若没有实证缺陷，不因为“创新”或“高级”而升级复杂度。
 
-```text
-Formulation F1
-- 结构依据：题面/公式/数据中的什么性质
-- 决策变量与状态变量：...
-- 目标与约束：...
-- 近似/消元/分解：...
-- 可能引入的误差或遗漏：...
-- 可验证基线：...
-- 结论：retain / reject
-```
+不同 formulation 才是真正有价值的反事实。仅同一 formulation 换 GA/PSO、改超参数，不算结构性不同。
 
-不同 formulation 才是真正有价值的反事实。仅同一 formulation 换 GA/PSO 不算结构性不同。
+### Step 3：读取竞赛建模经验
 
-### Step 3：最后选择模型族和 solver
+先读 `production/modeling.md` 检查大道至简、参数意义、真实 baseline、优化模型完整性、统计诊断和“小巧思”是否适用。该文件提供经验，不覆盖 modeling constitution 和 structural innovation。
 
-只有 formulation 明确后才读取 `model_catalog.md`。选择能最直接求解当前结构的工具：
+### Step 4：最后按需查 model catalog 并选择 solver
+
+只有 formulation 已明确，且确实需要补充候选工具时才读取 `model_catalog.md`：
 
 - 线性/凸结构优先精确优化或解析方法；
 - 树/图结构优先利用图算法和动态结构；
-- 大规模组合问题再考虑启发式或分解；
-- 预测问题可选择统计/ML，但不得无理由丢弃已知结构；
-- 黑箱与复杂模型只有在可验证地解决了简单模型的缺陷时才保留。
+- 大规模组合问题再考虑分解、启发式或近似；
+- 预测问题可选择统计/ML，是否为主模型由数据和泛化证据决定；
+- 黑箱与复杂模型只有在可验证地解决简单 baseline 缺陷时保留。
 
-候选必须解决同一任务并能公平比较。没有合理替代时记录检索范围，不凑数。
+模型目录是工具书，不是路由器。
 
-### Step 4：选型决策矩阵
+### Step 5：决策记录与命名
 
-维度建议：问题适配、结构利用程度、求解可行性、时间预算、可验证性、理论/文献支持。分数只是记录工具，不能覆盖明确的数学错误或错误假设。
+每个候选至少记录结构依据、变量、目标/约束、近似/分解、风险、baseline、验证计划与 retain/reject。名称只写真正进入公式、代码或实验的机制；标准模型使用标准名称。
 
-### Step 5：可核验命名
+### Step 6：Toy / 解析 sanity check
 
-名称只写已经进入公式、代码或实验的机制。若只实现标准模型，就使用标准名称。不得为了显得创新添加“改进、自适应、多层、融合”等修饰词。
-
-### Step 6：Toy demo / 解析 sanity check
-
-优先使用能暴露关键约束与失败模式的最小真实切片或合成 sanity case：
-
-```python
-case = build_representative_case(problem_data, cover=critical_constraints)
-model = build_model(case)
-result = solve(model, time_budget=remaining_stage_budget)
-assert result.status in accepted_statuses
-assert constraints_hold(result, case)
-```
-
-如有解析解、上下界或手算 toy case，必须拿来交叉验证数值结果。
+优先使用最小真实切片、手算 case、解析解、上下界或覆盖关键约束的合成 sanity case。合成 case 仅用于验证实现，不得冒充题目数据。
 
 ### Step 7：创新候选进入 DAG benchmark
 
-只有被 `adopt for testing` 的 innovation opportunity 才允许通过 `task_dag.py replan` 插入实验任务。例如：
+只有 `adopt for testing` 的候选才通过 `task_dag.py replan` 插入 baseline/proposed/compare 或 ablation：
 
 ```text
                  ┌─ baseline-solve ─────┐
@@ -130,25 +90,11 @@ TQi-model ───────┤                      ├─ innovation-compar
                  └─ proposed-solve ─────┘
 ```
 
-baseline 与 proposed 必须使用公平输入和指标。推荐 A 负责结构/公式，B 负责实现，C 或另一角色独立比较。不得同一执行者提出、实现、复核并自行宣布收益。
+输入和指标必须公平。推荐 A 负责结构/formulation，B 负责实现，C 或另一角色独立比较。Stage 3 最多标记 `tested/adopted`，经过 Stage 5/6 的量化比较与 failure test 后才能 `verified`。
 
-创新候选在此阶段最多是 `tested/adopted`，只有经过 Stage 5/6 的量化比较和定向攻击后才能标记 `verified`。
+### Step 8：跨子问题协调与 red-team
 
-### Step 8：跨子问题协调
-
-检查不同 Qi 的模型接口、单位、误差传播和数据结构。为统一工具而牺牲问题适配度时回退重评。
-
-### Step 9：championship red-team
-
-提出能真正改变选型结论的攻击，例如：
-
-- 关键近似不成立；
-- coarse stage 裁掉最优区；
-- 分解忽略了实质耦合；
-- ML 增益来自泄漏；
-- 复杂模型没有超越简单 baseline。
-
-每项给证据需求和当前状态，不凑数量。
+核对 Qi 之间的数据接口、单位、误差传播和共享口径。championship 模式重点攻击关键近似、全局最优区、被忽略耦合、数据泄漏、复杂模型是否真的超越简单 baseline，不凑数量。
 
 ## 写入状态
 
@@ -157,9 +103,7 @@ baseline 与 proposed 必须使用公平输入和指标。推荐 A 负责结构/
   "candidate_formulations": [],
   "candidate_models": [],
   "selected_per_subproblem": {},
-  "innovation_decisions": [
-    {"id": "I1", "decision": "test|reject", "reason": "...", "dag_tasks": []}
-  ],
+  "innovation_decisions": [],
   "rejection_log": [],
   "toy_demos_passed": true,
   "red_team": [],
@@ -171,26 +115,19 @@ baseline 与 proposed 必须使用公平输入和指标。推荐 A 负责结构/
 
 | 维度 | 满分行为 |
 |---|---|
-| 结构与 formulation | 先处理结构机会，再选算法；保留合理反事实 |
-| 选型理由 | 每候选有适配证据和拒绝理由 |
-| 命名真实性 | 所有修饰词都能定位到公式/代码/实验；允许标准名称 |
+| 题目契约 | 定义、单位、约束未被便利性替换 |
+| 结构与 formulation | 先处理结构机会，再选算法 |
+| 简单 baseline | 有公平基线；复杂度升级有缺陷证据 |
+| 命名真实性 | 所有修饰词能定位到公式/代码/实验 |
 | 求解可行性 | toy/解析 sanity check 通过 |
-| 可验证性 | 创新候选有公平 baseline、风险和 guard 计划 |
-
-## 常见坑
-
-- 看到题型关键词就直接选 GA/LSTM；
-- 把换 solver 当作 formulation 创新；
-- `A+B+C` 组合却说不清每个组件解决什么困难；
-- 为显得创新强行改名；
-- 没有 baseline 就声称“显著提升”；
-- 为了寻找创新把原本简单可解的问题复杂化。
+| 可验证性 | 创新候选有 baseline、风险、guard 与后续任务 |
 
 ## 退出条件
 
-1. 每 Qi 的 structure scan 已被处理；
-2. 主 formulation、模型与 solver 均有证据；
-3. toy/sanity check 通过；
-4. adopted innovation candidates 已进入可验证 DAG 任务，或明确没有候选；
-5. championship red-team 的实质风险有证据动作；
-6. L1 达到工作流阈值。
+1. 每 Qi 的 problem contract 与 structure scan 已处理；
+2. 最简单可行 formulation 和 baseline 已记录；
+3. 若升级复杂度，有明确缺陷证据；
+4. 主 formulation、模型与 solver 均有理由；
+5. toy/sanity check 通过；
+6. adopted innovation candidates 已进入可验证 DAG，或明确没有候选；
+7. L1 达到工作流阈值。

@@ -14,17 +14,44 @@
 
 ## 数值发布
 
-每个关键结论建立证据行：`claim_id → 题目要求 → 公式/模型版本 → run_id → 结果表行列 → 图表/文稿位置 → 人工复核记录`。
+每个关键结论建立证据行：`claim_id → 题目要求 → 公式/模型版本 → run_id → 结果表行列 → 图表/文稿位置 → 人工复核记录`。关键论文数字优先写入 `state/claims.json`，不要让论文成为数值事实源。
+
+推荐机械登记：
+
+```bash
+python <skill>/scripts/claim_registry.py add --workspace <project> \
+  --claim-id q3.served_total --value 26850.57 --unit person-times \
+  --source runs/q3/solution.json --source-field served_total \
+  --implementation src/q3/solve.py --verifier src/q3/verify_independent.py \
+  --independence-report runs/q3/independence.json --status verified \
+  --paper-ref paper/sections/Q3/result.md
+python <skill>/scripts/claim_registry.py check --workspace <project>
+```
+
+登记时保存 source/verifier/implementation 的 SHA256；同一 claim_id 更新会把旧记录移入 history，不静默覆盖。`check` 发现来源文件漂移、验证器漂移或 verified claim 缺少独立证据时失败。论文中的 headline values 必须来自当前 active claim，而不是从聊天、旧日志或旧图中复制。
 
 实际执行命令并检查退出状态、输出文件和关键数值。没有执行过只能说代码已编写/静态检查。随机或并行求解可能不能逐位一致，提前说明容差和可复现统计特征。性能无提升、效果下降或有偏差均如实报告。
 
 复核者至少对一个关键量做独立检查：手算小样例、另一实现、约束重算或独立拆分验证。第二个 AI 重述相同公式不算独立证据。无人能解释的核心推导不能标为已人工核验。
 
+对于“独立脚本复算”，先运行结构性防同源门：
+
+```bash
+python <skill>/scripts/verify_independence.py \
+  --verifier <project>/src/q3/verify_independent.py \
+  --implementation <project>/src/q3/solve.py \
+  --output <project>/runs/q3/independence.json
+```
+
+该检查会拒绝 verifier 与 implementation 同文件/同内容、直接 import 被验实现，或通过明显路径字面量重新运行被验实现。它只能证明“没有这些显式同源结构”，**不能证明数学上真的独立**；复核人仍要确认算法、推导或约束重算确实来自不同通道。
+
 ## 文稿检查
 
 逐问核对题目要求、假设、变量、约束、算法、结果、结论；摘要数字来自批准结果，不得“润色”改变精度、方向、单位或适用范围。图表由实际结果生成，AI 生成的示意图不可充当数据图。真实参考文献应打开原文核实作者、题名、结论和定位，不填看起来像真的引用。
 
-逐页查看最终 PDF：摘要、正文计页边界、乱码、公式截断、图表清晰度、未定义引用、空白/占位符。自动布局检测只能辅助；不能强制每张 caption 100—150 字、至少 21 页或每问 5 张图。
+在终审运行 `citation_audit.py`，把“有参考文献但正文零引用”、未定义 BibTeX/LaTeX/Pandoc 引用键设为硬错误；未引用的 bibliography 项至少需要人工确认。不能因为 `prose_lint.py` 没删 citation token 就认为引用结构正确。
+
+逐页查看最终 PDF：摘要、正文计页边界、乱码、公式截断、图表清晰度、未定义引用、空白/占位符。自动布局检测只能辅助；不能强制每张 caption 100—150 字、至少 21 页或每问 5 张图。`pdf_audit.py` 会读取同名 TeX `.log` 并检查 Overfull/Underfull；无自动错误也只返回 `needs_visual_review`，必须用真实视觉复核回执关闭。
 
 按官方要求核对正文页数与附录，不以 PDF 总页数判断 30 页上限；附录包含程序时总页数可以超过 30。字体、页边距和匿名采用当届规则与赛区要求。
 

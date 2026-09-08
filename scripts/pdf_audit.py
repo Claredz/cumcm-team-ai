@@ -6,8 +6,36 @@ import json
 import re
 from pathlib import Path
 
+OVERFULL_RE = re.compile(r"Overfull \\hbox .*?\((?P<pt>\d+(?:\.\d+)?)pt too wide\)", re.I)
+UNDERFULL_RE = re.compile(r"Underfull \\hbox", re.I)
 
-def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110):
+
+def tex_log_issues(content: str):
+    issues = []
+    for token in ["Missing character:", "Undefined control sequence", "undefined references"]:
+        if token in content:
+            issues.append({"severity": "error", "code": "tex-log", "detail": token})
+    overfull = [float(m.group("pt")) for m in OVERFULL_RE.finditer(content)]
+    if overfull:
+        worst = max(overfull)
+        severity = "error" if worst > 10 else "review"
+        issues.append({"severity": severity, "code": "overfull-hbox",
+                       "detail": f"{len(overfull)} Overfull \\hbox warnings; worst {worst:.1f}pt too wide"})
+    underfull = len(UNDERFULL_RE.findall(content))
+    if underfull:
+        issues.append({"severity": "review", "code": "underfull-hbox",
+                       "detail": f"{underfull} Underfull \\hbox warnings; inspect affected paragraphs"})
+    return issues
+
+
+def visual_review_passed(review: dict | None) -> bool:
+    if not review or review.get("status") != "passed":
+        return False
+    return all(review.get(k) for k in ("reviewer", "reviewed_at", "evidence"))
+
+
+def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110,
+          visual_review: dict | None = None):
     import pymupdf
     issues = []
     with pymupdf.open(path) as doc:
@@ -87,13 +115,18 @@ def audit(path: Path, competition="cumcm", body_start=None, body_end=None, rende
         log = path.with_suffix(".log")
         if log.exists():
             content = log.read_text(encoding="utf-8", errors="replace")
-            for token in ["Missing character:", "Undefined control sequence", "undefined references"]:
-                if token in content:
-                    issues.append({"severity": "error", "code": "tex-log", "detail": token})
+            issues.extend(tex_log_issues(content))
+        has_error = any(x["severity"] == "error" for x in issues)
+        if has_error:
+            status = "failed"
+        elif visual_review_passed(visual_review):
+            status = "passed"
+        else:
+            status = "needs_visual_review"
         return {"pdf": str(path), "competition": competition, "total_pages": n,
                 "counted_start": start, "counted_end": end, "counted_pages": count,
                 "limit": limit, "pages": pages, "issues": issues,
-                "status": "failed" if any(x["severity"] == "error" for x in issues) else "needs_visual_review"}
+                "visual_review": visual_review, "status": status}
 
 
 def main():
@@ -104,11 +137,14 @@ def main():
     ap.add_argument("--body-end", type=int)
     ap.add_argument("--render-dir", type=Path)
     ap.add_argument("--dpi", type=int, default=110)
+    ap.add_argument("--visual-review", type=Path,
+                    help="JSON receipt with status=passed, reviewer, reviewed_at and evidence; only use after actual visual inspection")
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args()
     if not 40 <= a.dpi <= 600:
         ap.error("dpi must be 40..600")
-    report = audit(a.pdf, a.competition, a.body_start, a.body_end, a.render_dir, a.dpi)
+    visual = json.loads(a.visual_review.read_text(encoding="utf-8")) if a.visual_review else None
+    report = audit(a.pdf, a.competition, a.body_start, a.body_end, a.render_dir, a.dpi, visual)
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"status": report["status"], "issues": len(report["issues"]), "output": str(a.output)}))

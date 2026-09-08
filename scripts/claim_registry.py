@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Trace key paper claims to frozen result files and independent verification evidence."""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def sha256(path: Path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def registry_path(workspace: Path):
+    return workspace / "state/claims.json"
+
+
+def load(workspace: Path):
+    p = registry_path(workspace)
+    if not p.exists():
+        return {"schema_version": 1, "claims": {}, "history": []}
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def save(workspace: Path, state: dict):
+    p = registry_path(workspace)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=p.parent, suffix=".tmp", delete=False) as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+        temp = f.name
+    os.replace(temp, p)
+
+
+def safe_file(workspace: Path, rel: str):
+    p = (workspace / rel).resolve()
+    root = workspace.resolve()
+    if not p.is_relative_to(root) or not p.is_file() or p.stat().st_size == 0:
+        raise ValueError(f"Missing, empty or outside-workspace evidence file: {rel}")
+    return p
+
+
+def file_record(workspace: Path, rel: str):
+    p = safe_file(workspace, rel)
+    return {"path": str(p.relative_to(workspace.resolve())), "sha256": sha256(p)}
+
+
+def register(workspace: Path, claim_id: str, value: str, unit: str, source: str, source_field: str,
+             status="provisional", implementation=None, verifier=None, independence_report=None,
+             paper_refs=None, note=""):
+    if not claim_id.strip() or not value.strip() or not source_field.strip():
+        raise ValueError("claim_id, value and source_field are required")
+    if status not in {"provisional", "verified"}:
+        raise ValueError("status must be provisional or verified")
+    state = load(workspace)
+    record = {
+        "claim_id": claim_id,
+        "value": value,
+        "unit": unit,
+        "source": file_record(workspace, source),
+        "source_field": source_field,
+        "status": status,
+        "paper_refs": list(paper_refs or []),
+        "note": note,
+        "recorded_at": now(),
+    }
+    if implementation:
+        record["implementation"] = file_record(workspace, implementation)
+    if verifier:
+        record["verifier"] = file_record(workspace, verifier)
+    if independence_report:
+        ir = file_record(workspace, independence_report)
+        report = json.loads((workspace / ir["path"]).read_text(encoding="utf-8"))
+        ir["reported_status"] = report.get("status")
+        record["independence_report"] = ir
+
+    if status == "verified":
+        if not verifier:
+            raise ValueError("verified claims require a verifier artifact")
+        if implementation:
+            if not independence_report:
+                raise ValueError("verified claims with an implementation require an independence report")
+            if record["independence_report"].get("reported_status") != "passed":
+                raise ValueError("independence report must have status=passed")
+
+    prior = state["claims"].get(claim_id)
+    if prior:
+        state["history"].append({"claim_id": claim_id, "superseded_at": now(), "record": prior})
+    state["claims"][claim_id] = record
+    save(workspace, state)
+    return record
+
+
+def check(workspace: Path):
+    state = load(workspace)
+    issues = []
+    for claim_id, claim in state.get("claims", {}).items():
+        for field in ("source", "implementation", "verifier", "independence_report"):
+            rec = claim.get(field)
+            if not rec:
+                continue
+            try:
+                p = safe_file(workspace, rec["path"])
+            except ValueError as exc:
+                issues.append({"severity": "error", "claim_id": claim_id, "code": "missing-evidence", "detail": str(exc)})
+                continue
+            current = sha256(p)
+            if current != rec.get("sha256"):
+                issues.append({"severity": "error", "claim_id": claim_id, "code": "evidence-drift",
+                               "detail": f"{rec['path']} changed after claim registration"})
+        if claim.get("status") == "verified":
+            if not claim.get("verifier"):
+                issues.append({"severity": "error", "claim_id": claim_id, "code": "verified-without-verifier"})
+            if claim.get("implementation"):
+                ir = claim.get("independence_report")
+                if not ir or ir.get("reported_status") != "passed":
+                    issues.append({"severity": "error", "claim_id": claim_id, "code": "independence-not-passed"})
+    status = "failed" if any(i["severity"] == "error" for i in issues) else "passed"
+    return {"status": status, "claims": len(state.get("claims", {})), "issues": issues}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("command", choices=["add", "check", "get"])
+    ap.add_argument("--workspace", type=Path, required=True)
+    ap.add_argument("--claim-id")
+    ap.add_argument("--value")
+    ap.add_argument("--unit", default="")
+    ap.add_argument("--source")
+    ap.add_argument("--source-field")
+    ap.add_argument("--status", choices=["provisional", "verified"], default="provisional")
+    ap.add_argument("--implementation")
+    ap.add_argument("--verifier")
+    ap.add_argument("--independence-report")
+    ap.add_argument("--paper-ref", action="append", default=[])
+    ap.add_argument("--note", default="")
+    ap.add_argument("--output", type=Path)
+    a = ap.parse_args()
+    try:
+        if a.command == "add":
+            if not all([a.claim_id, a.value, a.source, a.source_field]):
+                raise ValueError("add requires --claim-id --value --source --source-field")
+            result = register(a.workspace, a.claim_id, a.value, a.unit, a.source, a.source_field,
+                              a.status, a.implementation, a.verifier, a.independence_report,
+                              a.paper_ref, a.note)
+        elif a.command == "get":
+            if not a.claim_id:
+                raise ValueError("get requires --claim-id")
+            result = load(a.workspace).get("claims", {}).get(a.claim_id)
+            if result is None:
+                raise ValueError(f"Unknown claim: {a.claim_id}")
+        else:
+            result = check(a.workspace)
+        rendered = json.dumps(result, ensure_ascii=False, indent=2)
+        if a.output:
+            a.output.parent.mkdir(parents=True, exist_ok=True)
+            a.output.write_text(rendered, encoding="utf-8")
+        print(rendered)
+        if a.command == "check" and result["status"] == "failed":
+            raise SystemExit(1)
+    except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
+        ap.exit(2, f"Error: {exc}\n")
+
+
+if __name__ == "__main__":
+    main()

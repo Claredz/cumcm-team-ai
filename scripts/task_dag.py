@@ -9,7 +9,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 ACTIVE = ("planned", "in_progress", "stale")
@@ -74,6 +74,34 @@ def topo_order(tasks):
     return order
 
 
+def _scope(path: str) -> PurePosixPath:
+    """Normalize a repository-relative writable scope for overlap checks."""
+    raw = str(path).replace("\\", "/").strip()
+    if not raw:
+        raise ValueError("writable_paths cannot contain an empty path")
+    return PurePosixPath(raw.rstrip("/"))
+
+
+def _paths_overlap(a: str, b: str) -> bool:
+    pa, pb = _scope(a), _scope(b)
+    return pa == pb or pa in pb.parents or pb in pa.parents
+
+
+def _depends_transitively(by_id: dict, child_id: str, ancestor_id: str) -> bool:
+    """Return True when child is ordered after ancestor by the DAG."""
+    frontier = list(by_id[child_id].get("deps", []))
+    seen = set()
+    while frontier:
+        tid = frontier.pop()
+        if tid == ancestor_id:
+            return True
+        if tid in seen:
+            continue
+        seen.add(tid)
+        frontier.extend(by_id[tid].get("deps", []))
+    return False
+
+
 def validate_tasks(tasks):
     topo_order(tasks)
     by_id = task_map(tasks)
@@ -82,15 +110,28 @@ def validate_tasks(tasks):
             raise ValueError(f"{t['id']}: role must be A, B or C ({ROLE_DOC})")
         if t.get("reviewer") and t["reviewer"] == t.get("role"):
             raise ValueError(f"{t['id']}: reviewer must differ from the assigned role (cross-check)")
-    # single-writer: no two active tasks may share a writable path
-    owners = {}
-    for t in tasks:
-        if t.get("status", "planned") not in ACTIVE:
-            continue
-        for w in t.get("writable_paths", []):
-            if w in owners and owners[w] != t["id"]:
-                raise ValueError(f"Single-writer conflict on {w}: {owners[w]} vs {t['id']}")
-            owners[w] = t["id"]
+        gate = t.get("gate_stage")
+        if gate is not None and (not isinstance(gate, int) or not 0 <= gate <= 9):
+            raise ValueError(f"{t['id']}: gate_stage must be null or an integer 0..9")
+
+    # Single-writer means no concurrently executable active tasks may own overlapping
+    # scopes. Parent/child scopes are therefore conflicts unless the DAG orders the
+    # two tasks, in which case the earlier writer has already handed off before the
+    # later task becomes ready.
+    active = [t for t in tasks if t.get("status", "planned") in ACTIVE]
+    for i, left in enumerate(active):
+        for right in active[i + 1:]:
+            ordered = (_depends_transitively(by_id, left["id"], right["id"])
+                       or _depends_transitively(by_id, right["id"], left["id"]))
+            if ordered:
+                continue
+            for a in left.get("writable_paths", []):
+                for b in right.get("writable_paths", []):
+                    if _paths_overlap(a, b):
+                        raise ValueError(
+                            f"Single-writer conflict on overlapping scopes {a} vs {b}: "
+                            f"{left['id']} vs {right['id']}"
+                        )
 
 
 def cascade_stale(tasks, changed_ids, reason, events):
@@ -126,6 +167,30 @@ def ready_tasks(tasks):
             and all(by_id[d].get("status") == "done" for d in t.get("deps", []))]
 
 
+def _dependency_spec(dep: dict, qi: str):
+    """Return (model_upstreams, result_upstreams) with legacy-list compatibility.
+
+    New Stage-2 records use:
+      {"model_depends_on": [...], "result_depends_on": [...]}
+    A legacy list means both model and result dependency, preserving the old model
+    ordering while fixing the missing result gate.
+    """
+    raw = dep.get(qi, [])
+    if isinstance(raw, list):
+        model, result = raw, raw
+    elif isinstance(raw, dict):
+        model = raw.get("model_depends_on", [])
+        result = raw.get("result_depends_on", [])
+    else:
+        raise ValueError(f"{qi}: dependency must be a list or an object")
+    for label, values in (("model_depends_on", model), ("result_depends_on", result)):
+        if not isinstance(values, list) or any(not isinstance(x, str) or not x for x in values):
+            raise ValueError(f"{qi}.{label} must be a list of subproblem IDs")
+        if qi in values:
+            raise ValueError(f"{qi}.{label} cannot depend on itself")
+    return list(dict.fromkeys(model)), list(dict.fromkeys(result))
+
+
 def init(workspace: Path, seed: list | None):
     log_path = workspace / "state/decision_log.json"
     if seed is None:
@@ -139,7 +204,7 @@ def init(workspace: Path, seed: list | None):
         seed = seed_from_subproblems(qis, dep)
     seed = [normalize_new(t) for t in seed]
     validate_tasks(seed)
-    state = {"schema_version": 1, "dag_version": 1, "created_from_stage": 2,
+    state = {"schema_version": 2, "dag_version": 1, "created_from_stage": 2,
              "_role_doc": ROLE_DOC, "tasks": seed, "events": [
                  {"type": "init", "tasks": len(seed), "at": now()}]}
     save(dag_path(workspace), state)
@@ -153,51 +218,66 @@ def seed_from_subproblems(qis, dep):
         {"id": "T0-foundation", "title": "假设、符号、单位与数据口径", "subproblem": "*",
          "role": "A", "reviewer": "C", "deps": [], "writable_paths": ["models/foundation.md"],
          "outputs": [{"path": "models/foundation.md", "interface": "符号/单位表"}],
-         "acceptance": "符号唯一、单位可追溯、与题面一致", "status": "planned", "history": []},
+         "acceptance": "符号唯一、单位可追溯、与题面一致", "status": "planned", "history": [],
+         "gate_stage": None},
         {"id": "T0-datacheck", "title": "原始数据检查与基线数据集", "subproblem": "*",
          "role": "B", "reviewer": "A", "deps": [], "writable_paths": ["data/processed/", "src/"],
          "outputs": [{"path": "data/processed/", "interface": "清洗后数据+处理记录"}],
-         "acceptance": "数据字典完整、指纹可复现", "status": "planned", "history": []},
+         "acceptance": "数据字典完整、指纹可复现", "status": "planned", "history": [],
+         "gate_stage": None},
         {"id": "T0-skeleton", "title": "论文骨架与证据目录", "subproblem": "*",
          "role": "C", "reviewer": "B", "deps": [], "writable_paths": ["paper/"],
          "outputs": [{"path": "paper/", "interface": "章节骨架+证据索引"}],
-         "acceptance": "覆盖全部子问题、无未运行结论", "status": "planned", "history": []},
+         "acceptance": "覆盖全部子问题、无未运行结论", "status": "planned", "history": [],
+         "gate_stage": None},
     ]
     for qi in qis:
-        model_deps = [f"T{p}-model" for p in dep.get(qi, [])]
+        model_upstreams, result_upstreams = _dependency_spec(dep, qi)
+        unknown = sorted((set(model_upstreams) | set(result_upstreams)) - set(qis))
+        if unknown:
+            raise ValueError(f"{qi}: dependency refers to unknown subproblems: {unknown}")
+        model_deps = [f"T{p}-model" for p in model_upstreams]
+        result_deps = [f"T{p}-verify" for p in result_upstreams]
         verify_reviewer = "A" if qi != "Q1" else "C"
         tasks += [
             {"id": f"T{qi}-model", "title": f"{qi} 模型合同与选型", "subproblem": qi, "role": "A",
              "reviewer": "C", "deps": ["T0-foundation"] + model_deps,
-             "writable_paths": [f"models/{qi}.md"], "outputs": [{"path": f"models/{qi}.md", "interface": "目标/变量/约束/接口"}],
-             "acceptance": "toy 小样例通过、反例检验", "status": "planned", "history": []},
+             "writable_paths": [f"models/{qi}.md"],
+             "outputs": [{"path": f"models/{qi}.md", "interface": "目标/变量/约束/接口"}],
+             "acceptance": "toy 小样例通过、反例检验", "status": "planned", "history": [],
+             "gate_stage": 3},
             {"id": f"T{qi}-solve", "title": f"{qi} 实现与求解", "subproblem": qi, "role": "B",
-             "reviewer": "A", "deps": [f"T{qi}-model", "T0-datacheck"],
+             "reviewer": "A", "deps": [f"T{qi}-model", "T0-datacheck"] + result_deps,
              "writable_paths": [f"src/{qi}/", f"runs/{qi}/"],
              "outputs": [{"path": f"runs/{qi}/", "interface": "结果表+日志+run_id"}],
-             "acceptance": "复现命令可跑、约束满足、误差在限", "status": "planned", "history": []},
+             "acceptance": "复现命令可跑、约束满足、误差在限", "status": "planned", "history": [],
+             "gate_stage": 5},
             {"id": f"T{qi}-verify", "title": f"{qi} 结果交叉复核", "subproblem": qi,
              "role": verify_reviewer, "reviewer": "B",
              "deps": [f"T{qi}-solve"],
              "writable_paths": [f"runs/{qi}/review.md"],
              "outputs": [{"path": f"runs/{qi}/review.md", "interface": "复核结论+证据"}],
-             "acceptance": "关键数值独立复算一致", "status": "planned", "history": []},
+             "acceptance": "关键数值独立复算一致", "status": "planned", "history": [],
+             "gate_stage": 5},
             {"id": f"T{qi}-write", "title": f"{qi} 论文章节", "subproblem": qi, "role": "C",
-             "reviewer": "A", "deps": [f"T{qi}-verify"],
+             "reviewer": "A", "deps": [f"T{qi}-verify", "T0-skeleton"],
              "writable_paths": [f"paper/sections/{qi}/"],
              "outputs": [{"path": f"paper/sections/{qi}/", "interface": "成稿章节"}],
-             "acceptance": "数值与 runs 一致、引用真实", "status": "planned", "history": []},
+             "acceptance": "数值与 runs 一致、引用真实", "status": "planned", "history": [],
+             "gate_stage": 8},
         ]
     tasks += [
         {"id": "T9-robust", "title": "全局稳健性", "subproblem": "*", "role": "B", "reviewer": "A",
          "deps": [f"T{qi}-verify" for qi in qis], "writable_paths": ["runs/robustness/"],
          "outputs": [{"path": "runs/robustness/", "interface": "扰动区间+结论"}],
-         "acceptance": "有依据的扰动、结论稳定", "status": "planned", "history": []},
+         "acceptance": "有依据的扰动、结论稳定", "status": "planned", "history": [],
+         "gate_stage": 6},
         {"id": "T9-abstract", "title": "摘要与终稿整合", "subproblem": "*", "role": "C", "reviewer": "A",
          "deps": ["T9-robust", "T0-skeleton"] + [f"T{qi}-write" for qi in qis],
          "writable_paths": ["paper/abstract.md", "delivery/"],
          "outputs": [{"path": "paper/abstract.md", "interface": "终摘要"}],
-         "acceptance": "摘要数值可溯源、合规检查通过", "status": "planned", "history": []},
+         "acceptance": "摘要数值可溯源、合规检查通过", "status": "planned", "history": [],
+         "gate_stage": 8},
     ]
     return tasks
 
@@ -208,7 +288,8 @@ def normalize_new(raw: dict) -> dict:
          "deps": list(raw.get("deps", [])),
          "writable_paths": list(raw.get("writable_paths", [])),
          "outputs": list(raw.get("outputs", [])),
-         "acceptance": raw.get("acceptance", ""), "status": "planned", "history": []}
+         "acceptance": raw.get("acceptance", ""), "status": "planned", "history": [],
+         "gate_stage": raw.get("gate_stage")}
     if not t["reviewer"]:
         t["reviewer"] = {"A": "B", "B": "C", "C": "A"}[t["role"]]
     return t
@@ -239,9 +320,9 @@ def replan(workspace: Path, tasks_raw: list, cancel: list, reason: str):
     for raw in tasks_raw:
         if raw["id"] in by_id:
             t = by_id[raw["id"]]
-            t["history"].append({"at": now(), "change": {k: raw[k] for k in ("deps", "outputs", "writable_paths", "title") if k in raw},
+            t["history"].append({"at": now(), "change": {k: raw[k] for k in ("deps", "outputs", "writable_paths", "title", "gate_stage") if k in raw},
                                  "reason": reason})
-            for k in ("title", "subproblem", "reviewer", "acceptance"):
+            for k in ("title", "subproblem", "reviewer", "acceptance", "gate_stage"):
                 if k in raw:
                     t[k] = raw[k]
             for k in ("deps", "writable_paths", "outputs"):
@@ -287,7 +368,7 @@ def update(workspace: Path, task_id: str, status: str, receipt_path: Path | None
         if blocked:
             raise ValueError(f"{task_id} blocked by unfinished deps: {blocked}")
         if not receipt_path or not receipt_path.is_file():
-            raise ValueError(f"done requires --receipt (checks, artifacts, reviewer evidence)")
+            raise ValueError("done requires --receipt (checks, artifacts, reviewer evidence)")
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt.get("reviewer") != t.get("reviewer"):
             raise ValueError(f"receipt reviewer must be {t.get('reviewer')} (cross-check, differs from role {t.get('role')})")
@@ -335,8 +416,10 @@ def board(workspace: Path):
     return {"dag_version": state["dag_version"],
             "ready": [{"id": t["id"], "title": t["title"], "role": t["role"],
                        "reviewer": t.get("reviewer"), "subproblem": t.get("subproblem"),
-                       "status": t["status"], "acceptance": t.get("acceptance", "")} for t in ready],
-            "in_progress": [{"id": t["id"], "role": t["role"]} for t in state["tasks"] if t.get("status") == "in_progress"],
+                       "status": t["status"], "acceptance": t.get("acceptance", ""),
+                       "gate_stage": t.get("gate_stage")} for t in ready],
+            "in_progress": [{"id": t["id"], "role": t["role"], "gate_stage": t.get("gate_stage")}
+                            for t in state["tasks"] if t.get("status") == "in_progress"],
             "blocked": [{"id": k, "waiting_on": v} for k, v in blocked.items()],
             "done": [t["id"] for t in state["tasks"] if t.get("status") == "done"],
             "failed": [t["id"] for t in state["tasks"] if t.get("status") == "failed"],

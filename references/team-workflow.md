@@ -33,15 +33,17 @@ AI 会话按任务分，不按“万能队友”分。一个任务只负责一�
 Stage 2 拆解产出 `subproblem_dependency` 后，进入任务图派单：任务为有向无环图节点，按角色认领。规范：
 
 - `scripts/task_dag.py init --workspace <project>` 从拆解结果生成骨架图（每问 model(A)→solve(B)→verify(交叉)→write(C)，加全局基础/数据/骨架根节点和稳健性/摘要汇聚点）。骨架是起点不是强制，队伍用 `add`/`replan` 按实际调整。
+- `model_depends_on` 连接到上游 `model` 节点；`result_depends_on` 连接到上游 `verify` 节点。后者表示下游正式求解必须等待上游数值结果完成交叉核验，不能只等模型结构确定。
 - **派单看板**：`task_dag.py board` 列出就绪任务（依赖全部 done）、进行中、受阻原因，按 A/B/C 分工认领。一次认领一个，`update --status in_progress` 后开工。
 - **完成门槛**：`update --status done` 需复核回执——复核人必须 ≠ 负责人角色，含 `reviewed_at`/`evidence`/`checks`/`artifacts`，产物记 SHA256。
+- **阶段门槛**：默认任务带 `gate_stage`。`workflow.py complete` 会读取 DAG；如果目标阶段仍有应完成但处于 planned/in_progress/failed/stale 的任务，阶段不能放行。`workflow.py status` 同时报告 `dag_consistency`。
 - **保留调整余地**：方向变化时 `replan` 增删改任务（记 reason，dag_version 递增，历史不删除）；上游结果作废时 `invalidate --task <id>` 级联标 stale（下游全部失效但保留产物与历史），`check` 检测已完成任务的产物漂移并提示级联重做。已完成任务不能取消，只能失效重做，保证下游可追溯。
-- 硬约束由脚本校验：无环、依赖存在、同路径单写者、复核人 ≠ 负责人。取消一个仍被依赖的任务是允许的（会把下游留在 blocked 状态），replan 时应同步处理其下游。
+- 硬约束由脚本校验：无环、依赖存在、并发可执行任务的写入路径不得相同或存在父子目录重叠、复核人 ≠ 负责人。若两个任务写入域重叠但 DAG 已明确排序，则视为先完成再交接，不构成并发 single-writer 冲突。
 - 三个根任务（基础层、数据检查、论文骨架）无依赖可立即三人并行开工；每问四任务形成局部链，问与问之间按依赖图并行。
 
-对 Q1→Q2→Q3 的依赖：先明确输出字段、单位和误差传播。Q2 可用手工小样例测试接口，正式结果必须在 Q1 版本批准后重跑；不能把临时数值混入最终论文。若 Q2/Q3 真正独立，才分开实现——这一点在 Stage 2 的 `subproblem_dependency` 中写明，DAG 骨架会据此生成并行分支。
+对 Q1→Q2→Q3 的依赖：先明确输出字段、单位和误差传播。若 Q2 的模型定义只继承 Q1 的结构，则写 `model_depends_on: [Q1]`；若 Q2 的正式数值计算需要 Q1 的估计值/预测值/决策结果，则写 `result_depends_on: [Q1]`，DAG 会让 Q2-solve 等待 Q1-verify。Q2 可先用手工小样例测试接口，但正式结果必须在 Q1 版本批准后重跑；不能把临时数值混入最终论文。
 
-## 文件与版本约定
+## 文件、状态与版本约定
 
 可适配已有工程，建议：
 
@@ -53,13 +55,16 @@ models/                   假设、符号、接口
 src/                      可运行实现
 runs/<run-id>/            参数、日志、结果、图表
 paper/                    主稿与章节
-state/decision_log.json   v2 唯一主状态，总协调人写
-tasks/<task-id>/           任务卡与交接
+state/decision_log.json   学术决策与十阶段状态（authoritative）
+state/task_dag.json       任务执行与派单状态（authoritative）
+tasks/<task-id>/          任务卡与交接
 logs/ai/                  实际使用记录，内部原始记录分开保存
 delivery/                 冻结文件
 ```
 
-同一时间每个文件只有一个写入者；并行任务各写自己目录。C 整合主稿，B 发布批准的数据接口，A 或指定协调人更新总状态；不能让多个 AI 同时覆盖状态 JSON。版本控制可用本地 Git 和明确的分支/工作目录，也可用队内离线版本包。正式比赛不把赛题相关内容发布到公共仓库或向队外共享。
+`decision_log.json` 和 `task_dag.json` 不重复承担同一职责：前者是学术决策/阶段状态的权威来源，后者是任务执行状态的权威来源。`workflow.py status` 负责 reconciliation；不能靠人工假设二者天然同步。
+
+同一时间每个写入域只有一个写入者；并行任务各写自己目录。C 整合主稿，B 发布批准的数据接口，A 或指定协调人更新总状态；不能让多个 AI 同时覆盖同一状态文件。版本控制可用本地 Git 和明确的分支/工作目录，也可用队内离线版本包。
 
 结果记录至少包含：run_id、数据指纹、代码版本（无 Git 则文件哈希）、配置、随机种子（如适用）、运行命令、关键结果文件、验证结果、复核人代号。草稿图和最终图必须能区分。参数、清洗、公式有变化时，标记依赖结果及文稿失效并重算。
 

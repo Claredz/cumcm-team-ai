@@ -104,14 +104,13 @@ Keep `decision_log.compliance.ai_usage` current with tool/provider/model„ÄÅdate„
 
 ## 8. Render without detached sections
 
-From the project root:
+From the project root, use the same Python CLI on Windows PowerShell, Linux or WSL2:
 
-```bash
-python <skill>/scripts/render_paper.py \
-  --competition <competition> \
-  --workspace paper_workspace/ \
-  --output-dir paper_output/
+```text
+python <skill>/scripts/render_paper.py --competition <competition> --workspace paper_workspace/ --output-dir paper_output/
 ```
+
+`<skill>` is replaced with the actual skill path; on Windows a backslash path is also valid. Do not require Bash line continuations for the authoritative render path.
 
 A PDF with missing section inputs is a failure even if LaTeX exits successfully.
 

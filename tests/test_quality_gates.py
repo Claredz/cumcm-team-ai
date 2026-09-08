@@ -70,6 +70,8 @@ class CitationGateTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["undefined"], [])
             self.assertEqual(report["uncited"], [])
+            self.assertEqual(len(report["file_sha256"]), 1)
+            self.assertTrue(report["bibliography_sha256"])
 
 
 class IndependenceGateTests(unittest.TestCase):
@@ -154,6 +156,8 @@ class FinalGateTests(unittest.TestCase):
 
         (workspace / "runs").mkdir(exist_ok=True)
         (workspace / "src").mkdir(exist_ok=True)
+        (workspace / "paper").mkdir(exist_ok=True)
+        (workspace / "paper_output").mkdir(exist_ok=True)
         source = workspace / "runs/result.json"
         verifier = workspace / "src/review_value.py"
         source.write_text('{"headline":42}', encoding="utf-8")
@@ -161,21 +165,39 @@ class FinalGateTests(unittest.TestCase):
         claim_registry.register(workspace, "q1.headline", "42", "units",
                                 "runs/result.json", "headline", status="verified",
                                 verifier="src/review_value.py", paper_refs=["paper/Q1.md"])
-        (workspace / "state/citation-audit.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
-        (workspace / "state/pdf-audit-final.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+
+        paper = workspace / "paper/main.md"
+        paper.write_text("正文采用已有工作[1]。\n\n# 参考文献\n[1] Example.\n", encoding="utf-8")
+        citation = citation_audit.audit(paper)
+        self.assertEqual(citation["status"], "passed")
+        (workspace / "state/citation-audit.json").write_text(json.dumps(citation), encoding="utf-8")
+
+        final_pdf = workspace / "paper_output/main.pdf"
+        final_pdf.write_bytes(b"synthetic-final-pdf-for-gate")
+        pdf_report = {
+            "status": "passed",
+            "pdf": str(final_pdf.resolve()),
+            "pdf_sha256": pdf_audit.sha256(final_pdf),
+            "tex_log": None,
+        }
+        (workspace / "state/pdf-audit-final.json").write_text(json.dumps(pdf_report), encoding="utf-8")
+        return paper, final_pdf
 
     def test_unified_gate_ready_and_then_stale(self):
         with tempfile.TemporaryDirectory() as td:
             workspace = Path(td)
-            self._ready_workspace(workspace)
+            paper, _ = self._ready_workspace(workspace)
             report = final_gate.build_gate(workspace)
             self.assertEqual(report["status"], "READY")
             gate_path = workspace / "state/final-gate.json"
             gate_path.write_text(json.dumps(report), encoding="utf-8")
             workflow.require_final_gate(workspace)
-            (workspace / "state/citation-audit.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+            paper.write_text("正文已改变，仍引用[1]。\n\n# 参考文献\n[1] Example.\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 workflow.require_final_gate(workspace)
+            rebuilt = final_gate.build_gate(workspace)
+            self.assertEqual(rebuilt["status"], "BLOCKED")
+            self.assertTrue(any(i["code"] == "citation-target-drift" for i in rebuilt["issues"]))
 
 
 if __name__ == "__main__":

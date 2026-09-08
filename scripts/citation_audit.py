@@ -2,6 +2,7 @@
 """Mechanical bibliography/citation consistency audit for paper sources."""
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -15,11 +16,15 @@ REF_HEADING_RE = re.compile(r"^\s*(?:#+\s*)?(参考文献|References|Bibliograph
 REF_ENTRY_RE = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.、])\s+\S+", re.M)
 
 
+def sha256(path: Path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def read_paper(path: Path):
     if path.is_file():
-        return path.read_text(encoding="utf-8", errors="replace"), [str(path)]
-    files = sorted(p for p in path.rglob("*") if p.is_file() and p.suffix.lower() in TEXT_EXTS)
-    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files), [str(p) for p in files]
+        return path.read_text(encoding="utf-8", errors="replace"), [path.resolve()]
+    files = sorted(p.resolve() for p in path.rglob("*") if p.is_file() and p.suffix.lower() in TEXT_EXTS)
+    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files), files
 
 
 def split_body_refs(text: str):
@@ -54,7 +59,13 @@ def audit(paper: Path, bibliography: Path | None = None, strict_unused=False):
         bibs = sorted(paper.rglob("*.bib"))
         bibliography = bibs[0] if len(bibs) == 1 else None
 
-    result = {"paper": str(paper), "files": files, "bibliography": str(bibliography) if bibliography else None}
+    result = {
+        "paper": str(paper.resolve()),
+        "files": [str(p) for p in files],
+        "file_sha256": [{"path": str(p), "sha256": sha256(p)} for p in files],
+        "bibliography": str(bibliography.resolve()) if bibliography else None,
+        "bibliography_sha256": sha256(bibliography) if bibliography else None,
+    }
     if bibliography:
         defined = bib_keys(bibliography)
         undefined = sorted(cited_keys - defined)

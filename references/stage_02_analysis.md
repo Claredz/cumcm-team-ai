@@ -37,7 +37,7 @@ next: stage_03_model_selection
 
 - 子问题分解树 (全部 Qi 的输入/输出/约束/目标)
 - 关键变量清单 (覆盖实际模型所需变量并标注决策/状态/参数；不设凑数下限)
-- 子问题间关联图 (谁依赖谁的结果)
+- 子问题间关联图，并区分**模型结构依赖**和**已验证结果依赖**
 - 目标函数雏形 (符号级,不必精确)
 - 数据 schema 与变量映射
 
@@ -77,7 +77,12 @@ Q1 卡片
 └── 难度估计: easy / medium / hard
 ```
 
-**关键**: 每张 Qi 卡片的“上游依赖”列必须明确写依赖哪些结果。只有题面、数学接口或业务机制支持时才建立依赖；“题目未禁止”不构成复用证据。没有合理依赖时写“无”，并保留理由。
+**关键**: 每张 Qi 卡片必须区分两种依赖：
+
+- `model_depends_on`：下游模型的定义/结构依赖上游的模型、假设或符号合同；只要求上游模型合同已批准。
+- `result_depends_on`：下游正式求解需要上游计算结果、估计参数、预测值、分类标签或其他数值产物；必须等待上游 `verify` 完成后再跑正式结果。
+
+只有题面、数学接口或业务机制支持时才建立依赖；“题目未禁止”不构成复用证据。没有合理依赖时写空数组并保留理由。
 
 ### Step 3: 关键变量统一编号 (30 min)
 
@@ -122,14 +127,16 @@ print(df.isnull().sum())
 
 ### Step 5: 子问题关系图 (15 min)
 
-以 mermaid / ASCII 表达:
+以 mermaid / ASCII 表达，并给每条边标明依赖类型与接口:
 
 ```
-<上游 Qi> (<任务>)
-  ↓ <有证据支持的输出接口>
-<下游 Qj> (<任务>)
-  ↓ <有证据支持的输出接口>
-最终: <题面要求的交付>
+Q1 (参数估计)
+  ↓ result: theta_hat, sigma_hat；需 Q1 verify
+Q2 (优化决策)
+
+Q1-model
+  ↓ model: 共享状态定义/符号合同
+Q3-model
 ```
 
 写入 `decision_log.stages.2.decomposition`。
@@ -144,9 +151,9 @@ Q1: max  Σ_i p_i * x_i  - C(x)
          x_i ≥ 0, x_i ∈ Z
 
 Q2: 在 Q1 基础上加约束 K_i ≤ K_max
-    
+
 Qi: <与该子问题匹配的符号化目标>
-    若使用上游结果或 warm start，注明接口与依据；否则保持独立
+    若使用上游结果或 warm start，注明接口、依赖类型与依据；否则保持独立
 ```
 
 ### Step 7: 输出移交 (5 min)
@@ -159,9 +166,14 @@ Qi: <与该子问题匹配的符号化目标>
   "key_constraints": [...],
   "objective_per_subproblem": {"<Qi>": "..."},
   "data_schema": {...},
-  "subproblem_dependency": {"<Qi>": ["<only evidence-backed upstream IDs>"]}
+  "subproblem_dependency": {
+    "Q1": {"model_depends_on": [], "result_depends_on": []},
+    "Q2": {"model_depends_on": [], "result_depends_on": ["Q1"]}
+  }
 }
 ```
+
+旧版本的 `"Q2": ["Q1"]` 仍可读取，但按兼容规则同时解释为模型依赖与结果依赖；新项目必须使用上面的显式结构。
 
 ---
 
@@ -173,7 +185,7 @@ Qi: <与该子问题匹配的符号化目标>
 | 2. 关键变量识别 | 覆盖目标、约束与数据接口，标注类型，无占位变量 |
 | 3. 数学化程度 | 每 Qi 有目标雏形 |
 | 4. 数据契合度 | schema 已扫,变量映射清楚 |
-| 5. 子问题关联性 | 每个 Qi 的依赖或独立理由均已识别 |
+| 5. 子问题关联性 | 每个 Qi 的模型依赖、结果依赖或独立理由均已识别 |
 
 ---
 
@@ -183,6 +195,7 @@ Qi: <与该子问题匹配的符号化目标>
 - 子问题间符号不统一 (B4) → 统一变量表
 - 附件数据没扫 → strictly 必做 Step 4
 - 为了“串起来”强行复用上游结果 (G1) → 只保留题面、数学或业务机制支持的依赖
+- 只让 Q2-model 依赖 Q1-model，却让 Q2-solve 在 Q1 数值结果核验前启动 → 有数值输入时必须写入 `result_depends_on`
 
 ---
 
@@ -191,9 +204,9 @@ Qi: <与该子问题匹配的符号化目标>
 1. 题面中的全部子问题卡片完整
 2. 全局变量表覆盖后续模型实际所需项且无凑数项
 3. 数据 schema 扫描完成
-4. 每个 Qi 的依赖关系明确 (依赖 / 独立,均有理由)
+4. 每个 Qi 的模型依赖、结果依赖或独立关系明确并有理由
 5. L1 rubric 全维 ≥7
 
 → 跳转 `stage_03_model_selection.md`
 
-拆解完成后启用 DAG 派单：`task_dag.py init --workspace <project>` 读取本阶段的 `subproblem_dependency` 生成任务图（见 team-workflow.md「DAG 派单模式」），三人从 `board` 就绪任务认领；后续建模/求解/写作按图推进，调整用 replan，上游作废用 invalidate。
+拆解完成后启用 DAG 派单：`task_dag.py init --workspace <project>` 读取本阶段的 `subproblem_dependency` 生成任务图（见 team-workflow.md「DAG 派单模式」）。`model_depends_on` 连接到上游 model 节点，`result_depends_on` 连接到上游 verify 节点；后续调整用 replan，上游作废用 invalidate。

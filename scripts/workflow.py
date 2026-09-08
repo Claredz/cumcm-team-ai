@@ -31,6 +31,45 @@ def load(workspace: Path):
     return json.loads((workspace / "state/decision_log.json").read_text(encoding="utf-8"))
 
 
+def load_task_dag(workspace: Path):
+    path = workspace / "state/task_dag.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def dag_consistency(workspace: Path, stage: int | None = None):
+    """Compare workflow stage state with the execution DAG.
+
+    decision_log.json remains authoritative for academic/stage decisions; task_dag.json
+    is authoritative for task execution. Tasks may declare gate_stage=N, meaning stage N
+    cannot complete until that task is done. Cancelled tasks are treated as intentionally
+    removed by a recorded replan; failed/stale/planned/in_progress tasks block the gate.
+    """
+    dag = load_task_dag(workspace)
+    if dag is None:
+        return {"present": False, "issues": [], "blocking_tasks": []}
+    state = load(workspace)
+    current = state.get("current_stage", 0) if stage is None else stage
+    tasks = dag.get("tasks", [])
+    blocking = []
+    issues = []
+    for task in tasks:
+        gate = task.get("gate_stage")
+        status = task.get("status", "planned")
+        if gate is not None and gate <= current and status not in ("done", "cancelled"):
+            blocking.append({"id": task.get("id"), "gate_stage": gate, "status": status})
+    if blocking:
+        issues.append("DAG has unfinished tasks required by the current/target stage")
+
+    wf = state.get("workflow", {})
+    if wf.get("finished") and any(t.get("status") not in ("done", "cancelled")
+                                  for t in tasks if t.get("gate_stage") is not None):
+        issues.append("workflow is marked finished while gated DAG tasks remain unfinished")
+    return {"present": True, "dag_version": dag.get("dag_version"),
+            "issues": issues, "blocking_tasks": blocking}
+
+
 def init(workspace: Path, competition: str, year: int, interaction="autonomous", formal=False):
     path = workspace / "state/decision_log.json"
     if path.exists():
@@ -73,6 +112,12 @@ def complete(workspace: Path, stage: int, receipt: dict):
     score_records = state.get("scores", {}).get(str(stage), [])
     if score_records and score_records[-1].get("verdict") == "block":
         raise ValueError("Latest stage score still blocks completion; repair and reassess")
+
+    dag_check = dag_consistency(workspace, stage)
+    if dag_check["present"] and dag_check["blocking_tasks"]:
+        ids = ", ".join(f"{x['id']}({x['status']})" for x in dag_check["blocking_tasks"])
+        raise ValueError(f"Task DAG is inconsistent with stage completion; unfinished gated tasks: {ids}")
+
     if wf.get("formal_contest") and stage in {1, 3, 5, 9}:
         review = receipt.get("human_review", {})
         if not all(review.get(k) for k in ("reviewer", "reviewed_at", "evidence")):
@@ -131,10 +176,12 @@ def status(workspace: Path):
                 changed.append(item["path"])
     s = state["current_stage"]
     reference = next((ROOT / "references").glob(f"stage_{s:02d}_*.md"))
+    dag_check = dag_consistency(workspace, s)
     return {"competition": state["competition"], "stage": s, "name": STAGES[s],
             "reference": str(reference), "finished": wf.get("finished", False),
             "stale_stages": wf.get("stale", []), "changed_artifacts": sorted(set(changed)),
-            "handoff": wf.get("handoff"), "interaction": wf.get("interaction", "autonomous")}
+            "handoff": wf.get("handoff"), "interaction": wf.get("interaction", "autonomous"),
+            "dag_consistency": dag_check}
 
 
 def main():

@@ -85,7 +85,7 @@ class IndependenceGateTests(unittest.TestCase):
             impl = root / "solver.py"
             verifier = root / "verify.py"
             impl.write_text("def solve(): return 1\n", encoding="utf-8")
-            verifier.write_text("value = sum([1])\nassert value == 1\n", encoding="utf-8")
+            verifier.write_text('"""Independent solver check."""\nvalue = sum([1])\nassert value == 1\n', encoding="utf-8")
             report = verify_independence.audit(verifier, impl)
             self.assertEqual(report["status"], "passed")
 
@@ -119,14 +119,22 @@ class ClaimRegistryTests(unittest.TestCase):
 
 
 class WorkflowReconcileTests(unittest.TestCase):
-    def test_later_artifact_warns_when_stage_log_lags(self):
+    def test_final_pdf_warns_when_stage_log_lags(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            workflow.init(workspace, "cumcm", 2026)
+            (workspace / "paper_workspace" / "main.pdf").write_bytes(b"synthetic-pdf-marker")
+            report = workflow.reconcile(workspace)
+            self.assertFalse(report["reconcile"]["ready"])
+            self.assertTrue(any(w["code"] == "bookkeeping-lag" for w in report["reconcile"]["warnings"]))
+
+    def test_early_paper_draft_does_not_trigger_lag(self):
         with tempfile.TemporaryDirectory() as td:
             workspace = Path(td)
             workflow.init(workspace, "cumcm", 2026)
             (workspace / "paper_workspace" / "draft.md").write_text("draft", encoding="utf-8")
             report = workflow.reconcile(workspace)
-            self.assertFalse(report["reconcile"]["ready"])
-            self.assertTrue(any(w["code"] == "bookkeeping-lag" for w in report["reconcile"]["warnings"]))
+            self.assertTrue(report["reconcile"]["ready"])
 
 
 if __name__ == "__main__":

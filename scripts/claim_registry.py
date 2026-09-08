@@ -51,6 +51,20 @@ def file_record(workspace: Path, rel: str):
     return {"path": str(p.relative_to(workspace.resolve())), "sha256": sha256(p)}
 
 
+def _load_independence_report(workspace: Path, record: dict):
+    p = safe_file(workspace, record["path"])
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _validate_independence_binding(report: dict, verifier_rec: dict, implementation_rec: dict):
+    if report.get("status") != "passed":
+        raise ValueError("independence report must have status=passed")
+    if report.get("verifier_sha256") != verifier_rec.get("sha256"):
+        raise ValueError("independence report does not match the registered verifier SHA256")
+    if report.get("implementation_sha256") != implementation_rec.get("sha256"):
+        raise ValueError("independence report does not match the registered implementation SHA256")
+
+
 def register(workspace: Path, claim_id: str, value: str, unit: str, source: str, source_field: str,
              status="provisional", implementation=None, verifier=None, independence_report=None,
              paper_refs=None, note=""):
@@ -76,8 +90,10 @@ def register(workspace: Path, claim_id: str, value: str, unit: str, source: str,
         record["verifier"] = file_record(workspace, verifier)
     if independence_report:
         ir = file_record(workspace, independence_report)
-        report = json.loads((workspace / ir["path"]).read_text(encoding="utf-8"))
+        report = _load_independence_report(workspace, ir)
         ir["reported_status"] = report.get("status")
+        ir["verifier_sha256"] = report.get("verifier_sha256")
+        ir["implementation_sha256"] = report.get("implementation_sha256")
         record["independence_report"] = ir
 
     if status == "verified":
@@ -86,8 +102,10 @@ def register(workspace: Path, claim_id: str, value: str, unit: str, source: str,
         if implementation:
             if not independence_report:
                 raise ValueError("verified claims with an implementation require an independence report")
-            if record["independence_report"].get("reported_status") != "passed":
-                raise ValueError("independence report must have status=passed")
+            _validate_independence_binding(
+                _load_independence_report(workspace, record["independence_report"]),
+                record["verifier"], record["implementation"],
+            )
 
     prior = state["claims"].get(claim_id)
     if prior:
@@ -115,12 +133,21 @@ def check(workspace: Path):
                 issues.append({"severity": "error", "claim_id": claim_id, "code": "evidence-drift",
                                "detail": f"{rec['path']} changed after claim registration"})
         if claim.get("status") == "verified":
-            if not claim.get("verifier"):
+            verifier = claim.get("verifier")
+            implementation = claim.get("implementation")
+            if not verifier:
                 issues.append({"severity": "error", "claim_id": claim_id, "code": "verified-without-verifier"})
-            if claim.get("implementation"):
+            if implementation:
                 ir = claim.get("independence_report")
-                if not ir or ir.get("reported_status") != "passed":
+                if not ir:
                     issues.append({"severity": "error", "claim_id": claim_id, "code": "independence-not-passed"})
+                else:
+                    try:
+                        report = _load_independence_report(workspace, ir)
+                        _validate_independence_binding(report, verifier, implementation)
+                    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+                        issues.append({"severity": "error", "claim_id": claim_id, "code": "independence-binding-invalid",
+                                       "detail": str(exc)})
     status = "failed" if any(i["severity"] == "error" for i in issues) else "passed"
     return {"status": status, "claims": len(state.get("claims", {})), "issues": issues}
 

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+*.aux
+*.log
+*.out
+*.synctex.gz
+paper_output/
+support_materials/
+local-corpus/

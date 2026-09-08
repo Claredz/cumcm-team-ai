@@ -1,0 +1,24 @@
+% SPDX-License-Identifier: MIT
+% Copyright (c) 2026 Claredz and cumcm-team-ai contributors
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{pandoc-compat}[2026/09/08 Pandoc fragment compatibility]
+\RequirePackage{graphicx}
+\RequirePackage{array}
+\RequirePackage{calc}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+% New Pandoc emits a bounded-image wrapper; cap width and total height.
+\providecommand{\pandocbounded}[1]{%
+  \begingroup
+  \setbox0=\hbox{#1}%
+  \ifdim\wd0>\linewidth
+    \setbox0=\hbox{\resizebox{\linewidth}{!}{\box0}}%
+  \fi
+  \dimen0=\ht0\advance\dimen0 by\dp0
+  \ifdim\dimen0>.85\textheight
+    \resizebox*{!}{.85\textheight}{\box0}%
+  \else\box0\fi
+  \endgroup}
+% Older graphicx has no PDF tagging alt key; preserve the visible caption.
+\makeatletter
+\@ifundefined{KV@Gin@alt}{\define@key{Gin}{alt}{}}{}
+\makeatother

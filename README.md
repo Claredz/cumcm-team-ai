@@ -31,15 +31,42 @@
 | 引用一致性 | [citation_audit.py](scripts/citation_audit.py) |
 | AI 使用披露 | [render_ai_usage.py](scripts/render_ai_usage.py)，按赛事生成声明/报告 |
 | 往届论文资料与统计 | [data/papers](data/papers)、本地导入/去重/QA/分组统计 |
+| 跨平台运行 | GitHub Actions 同时回归 `ubuntu-latest` / `windows-latest`；[Windows](references/setup-windows.md) 与 [Linux/WSL2](references/setup-linux-wsl.md) 独立配置指南 |
 | 自动化测试 | tests/ + GitHub Actions；含夜间学习空间事故回归、结构创新和质量门测试 |
 
 分问和题型脚本输出只是候选。AI 继续核对原题、图、公式和隐含约束；脚本不宣称能独立理解或求解任意题目。
 
+## 平台支持
+
+正式支持目标：
+
+- Windows 10/11 + PowerShell；
+- Linux；
+- Windows + WSL2。
+
+核心 Python workflow 不要求 Bash。Windows 和 Ubuntu 都由 CI 跑同一套 unittest、compileall 和三赛事 doctor 核心检查。Pandoc、TeX、字体等大型外部工具仍由每台比赛机本地 `doctor.py` 预检。
+
+详细配置：
+
+- [Windows 10/11 原生 PowerShell](references/setup-windows.md)
+- [Linux / WSL2](references/setup-linux-wsl.md)
+
 ## 项目级安装
+
+Linux / WSL2：
 
 ```bash
 mkdir -p .agents/skills
 git clone https://github.com/Claredz/cumcm-team-ai.git .agents/skills/cumcm-team-ai
+python -m pip install -r .agents/skills/cumcm-team-ai/requirements.txt
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory -Force .agents\skills | Out-Null
+git clone https://github.com/Claredz/cumcm-team-ai.git .agents\skills\cumcm-team-ai
+python -m pip install -r .agents\skills\cumcm-team-ai\requirements.txt
 ```
 
 推荐提示：
@@ -52,14 +79,13 @@ git clone https://github.com/Claredz/cumcm-team-ai.git .agents/skills/cumcm-team
 
 ## 最短运行路径
 
-Python 3.10+：
+Python 3.10+。核心 CLI 参数在 Windows/Linux 相同，路径由 `pathlib` 处理。以下从项目根运行：
 
-```bash
-python -m pip install -r .agents/skills/cumcm-team-ai/requirements.txt
-python scripts/workflow.py init --workspace /path/to/project --competition cumcm --year 2026
-python scripts/doctor.py --competition cumcm --workspace /path/to/project
-python scripts/parse_problem.py /path/to/project/problem.pdf --attachments /path/to/project/data.xlsx --output /path/to/project/state/problem-package.json
-python scripts/workflow.py next --workspace /path/to/project
+```text
+python .agents/skills/cumcm-team-ai/scripts/workflow.py init --workspace . --competition cumcm --year 2026
+python .agents/skills/cumcm-team-ai/scripts/doctor.py --competition cumcm --workspace .
+python .agents/skills/cumcm-team-ai/scripts/parse_problem.py problem/problem.pdf --attachments data/raw/data.xlsx --output state/problem-package.json
+python .agents/skills/cumcm-team-ai/scripts/workflow.py next --workspace .
 ```
 
 求解脚本应通过 `--workspace` / config / manifest 使用项目相对路径定位数据；解析后的绝对路径可以写日志用于诊断，但不要把个人机器路径硬编码进代码或支撑材料。
@@ -78,7 +104,9 @@ Stage 0–2 统一读题、选题、拆解和结构扫描。Stage 2 完成后，
 
 ## 验证与开发
 
-```bash
+跨平台核心回归命令相同：
+
+```text
 python -m unittest discover -s tests -v
 python -m compileall -q scripts templates/shared/code_starter
 python scripts/doctor.py --competition cumcm --skip-tools
@@ -86,4 +114,4 @@ python scripts/doctor.py --competition mcm --skip-tools
 python scripts/doctor.py --competition diangong --skip-tools
 ```
 
-继承的经验建议统一由 [integration-policy.md](references/integration-policy.md) 适配；不强制每问图数、公式数、最低正文页数或每阶段人工确认。数学正确性始终以实际推导、实验和验证为准。
+CI 在 Windows 与 Ubuntu 上都运行以上检查。继承的经验建议统一由 [integration-policy.md](references/integration-policy.md) 适配；不强制每问图数、公式数、最低正文页数或每阶段人工确认。数学正确性始终以实际推导、实验和验证为准。

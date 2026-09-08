@@ -26,6 +26,7 @@ citation_audit = load_script("citation_audit")
 verify_independence = load_script("verify_independence")
 claim_registry = load_script("claim_registry")
 workflow = load_script("workflow")
+final_gate = load_script("final_gate")
 
 
 class PdfLogGateTests(unittest.TestCase):
@@ -139,6 +140,42 @@ class WorkflowReconcileTests(unittest.TestCase):
             (workspace / "paper_workspace" / "draft.md").write_text("draft", encoding="utf-8")
             report = workflow.reconcile(workspace)
             self.assertTrue(report["reconcile"]["ready"])
+
+
+class FinalGateTests(unittest.TestCase):
+    def _ready_workspace(self, workspace: Path):
+        workflow.init(workspace, "cumcm", 2026)
+        state = workflow.load(workspace)
+        state["current_stage"] = 9
+        for key in state["stages"]["9"]["compliance_checks"]:
+            state["stages"]["9"]["compliance_checks"][key] = True
+        state["compliance"]["ai_usage"] = []
+        workflow.save(workspace / "state/decision_log.json", state)
+
+        (workspace / "runs").mkdir(exist_ok=True)
+        (workspace / "src").mkdir(exist_ok=True)
+        source = workspace / "runs/result.json"
+        verifier = workspace / "src/review_value.py"
+        source.write_text('{"headline":42}', encoding="utf-8")
+        verifier.write_text("assert 40 + 2 == 42\n", encoding="utf-8")
+        claim_registry.register(workspace, "q1.headline", "42", "units",
+                                "runs/result.json", "headline", status="verified",
+                                verifier="src/review_value.py", paper_refs=["paper/Q1.md"])
+        (workspace / "state/citation-audit.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+        (workspace / "state/pdf-audit-final.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+
+    def test_unified_gate_ready_and_then_stale(self):
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            self._ready_workspace(workspace)
+            report = final_gate.build_gate(workspace)
+            self.assertEqual(report["status"], "READY")
+            gate_path = workspace / "state/final-gate.json"
+            gate_path.write_text(json.dumps(report), encoding="utf-8")
+            workflow.require_final_gate(workspace)
+            (workspace / "state/citation-audit.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                workflow.require_final_gate(workspace)
 
 
 if __name__ == "__main__":

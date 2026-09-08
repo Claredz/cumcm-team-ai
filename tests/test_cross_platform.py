@@ -44,7 +44,8 @@ class CrossPlatformDocsTests(unittest.TestCase):
 
     def test_toolchain_core_commands_do_not_require_bash_continuations(self):
         text = (ROOT / "references" / "toolchain.md").read_text(encoding="utf-8")
-        self.assertNotIn("main.pdf --competition cumcm \\", text)
+        legacy_multiline = "main.pdf --competition cumcm " + chr(92) + "\n"
+        self.assertNotIn(legacy_multiline, text)
         self.assertIn("Windows PowerShell", text)
         self.assertIn("Linux/WSL2", text)
 

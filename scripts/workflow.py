@@ -153,12 +153,12 @@ def complete(workspace: Path, stage: int, receipt: dict):
         artifacts.append({"path": str(p.relative_to(workspace.resolve())),
                           "sha256": hashlib.sha256(p.read_bytes()).hexdigest()})
     if stage == 9:
-        require_final_gate(workspace)
         checks = state["stages"]["9"]["compliance_checks"]
         if not all(value is True for value in checks.values()):
             raise ValueError("Final compliance checks are incomplete")
         if state.get("compliance", {}).get("ai_usage") is None:
             raise ValueError("AI usage ledger is unconfirmed")
+        require_final_gate(workspace)
     record = {"at": now(), "artifacts": artifacts, "receipt": receipt}
     wf["completed"][str(stage)] = record
     wf["stale"] = [s for s in wf.get("stale", []) if s != stage]

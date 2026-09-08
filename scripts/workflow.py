@@ -93,6 +93,27 @@ def init(workspace: Path, competition: str, year: int, interaction="autonomous",
     return state
 
 
+def require_final_gate(workspace: Path):
+    gate_path = workspace / "state/final-gate.json"
+    if not gate_path.is_file() or gate_path.stat().st_size == 0:
+        raise ValueError("Stage 9 requires state/final-gate.json from final_gate.py")
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    if gate.get("status") != "READY":
+        raise ValueError("Final quality gate is not READY")
+    for label, rec in gate.get("inputs", {}).items():
+        rel = rec.get("path")
+        expected = rec.get("sha256")
+        if not rel or not expected:
+            raise ValueError(f"Final gate input record is incomplete: {label}")
+        p = (workspace / rel).resolve()
+        if not p.is_relative_to(workspace.resolve()) or not p.is_file():
+            raise ValueError(f"Final gate input disappeared: {rel}")
+        current = hashlib.sha256(p.read_bytes()).hexdigest()
+        if current != expected:
+            raise ValueError(f"Final gate is stale; rerun after input changed: {rel}")
+    return gate
+
+
 def complete(workspace: Path, stage: int, receipt: dict):
     state = load(workspace)
     if stage != state["current_stage"] or not 0 <= stage <= 9:
@@ -132,6 +153,7 @@ def complete(workspace: Path, stage: int, receipt: dict):
         artifacts.append({"path": str(p.relative_to(workspace.resolve())),
                           "sha256": hashlib.sha256(p.read_bytes()).hexdigest()})
     if stage == 9:
+        require_final_gate(workspace)
         checks = state["stages"]["9"]["compliance_checks"]
         if not all(value is True for value in checks.values()):
             raise ValueError("Final compliance checks are incomplete")
@@ -268,7 +290,7 @@ def main():
             rollback(args.workspace, args.stage, args.reason)
         result = reconcile(args.workspace) if args.command == "reconcile" else status(args.workspace)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    except (ValueError, OSError, KeyError) as exc:
+    except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
         ap.exit(2, f"Error: {exc}\n")
 
 

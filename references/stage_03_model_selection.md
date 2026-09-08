@@ -3,10 +3,11 @@ stage: 3
 name: model_selection
 duration_h: 2-3
 inputs:
-  - "stage.2.{decomposition, objective_per_subproblem, data_schema}"
+  - "stage.2.{decomposition, objective_per_subproblem, data_schema, structure_scan, innovation_opportunities}"
 outputs:
-  - "stage.3.{candidate_models, selected_per_subproblem, rejection_log, toy_demos_passed, red_team, model_family_consistency}"
+  - "stage.3.{candidate_formulations, candidate_models, selected_per_subproblem, rejection_log, toy_demos_passed, innovation_decisions, red_team, model_family_consistency}"
 loads_reference:
+  - "references/structural-innovation.md"
   - "references/model_catalog.md"
   - "references/rubrics.md§Stage_3"
   - "competitions/<comp>/winning_patterns.md§4"
@@ -15,176 +16,181 @@ feedback: ["L1", "counterfactual_exploration_in_championship"]
 next: stage_04_foundation
 ---
 
-# Stage 3 — 模型选型 (证据驱动的合理候选集)
+# Stage 3 — 从问题结构到模型与求解器
 
-> v2 适配：本页为导入参考。执行前以根 SKILL.md 和 references/integration-policy.md 为准：默认自主推进，普通修错不等待确认；固定图数/字数只作建议；赛事规则与 AI 披露以当前比赛包为准。旧问答示例仅用于 guided 模式。
+> v2 适配：本页为导入参考。执行前以根 SKILL.md 和 references/integration-policy.md 为准。默认自主推进；模型复杂度和算法数量不是质量代理。
 
-**时长**: 2-3h | **反馈层**: L1 + 反事实探索 (championship 深挖真实可行的替代路径)
-
----
+**时长**: 2-3h | **反馈层**: L1 + 反事实探索
 
 ## 目标
 
-为每个子问题选定一个证据最充分的主模型，并记录所有真实可行的替代模型及否决依据。候选数量由问题结构和证据决定；若检索后没有合理替代，记录检索范围与原因，不用不适配模型凑数。模型名称必须准确反映实际实现，跨子问题接口必须可解释。
+为每个子问题先确定**问题表示与 mathematical formulation**，再选择模型族和 solver。必须消费 Stage 2 的 `structure_scan`，不能直接从关键词跳到算法目录。
 
----
+默认顺序：
 
-## 输入
+`structure → representation/formulation → approximation/decomposition → solver/algorithm`
 
-- stage 2 输出: 子问题卡片 + 目标函数雏形 + 数据 schema
-- `references/model_catalog.md` 必读
+创新优先发生在问题表示、结构利用和求解策略层；标准模型若最适合，就使用标准名称。
 
 ## 产出
 
-- 每个 Qi 的主模型 + 准确名称 + 选型理由
-- 每个 Qi 的合理替代候选 + 否决理由；没有合理替代时记录检索证据
-- 覆盖关键失败模式的最小可执行 demo (Python)
-- (championship) red-team 攻击与回应
-
----
+- 每个 Qi 的结构处理决定：哪些机会 adopted/rejected，为什么；
+- 候选 formulation 与合理替代；
+- 主模型、求解器与选型理由；
+- 最小可执行 toy demo；
+- 若采用结构创新候选，则产生可验证的 baseline/proposed 计划；
+- championship 模式的 red-team 证据。
 
 ## 操作流程
 
-### Step 1: 问题类型映射 (10 min)
+### Step 0：先读 structure scan
 
-对每个 Qi,查 `references/model_catalog.md` §0 速查表:
+对 Stage 2 每个结构机会逐项做：
 
-```
-Q1: "求最优生产计划" → 优化类 (LP/IP)
-Q2: "考虑库存约束" → 优化类 (MIP) + 启发式
-Q3: "随机需求下的稳健决策" → 鲁棒优化 / 随机规划 / 蒙特卡罗
-```
-
-### Step 2: 候选生成 (45 min)
-
-为每个 Qi 从题面目标、约束类型、数据规模、缺失机制与可用求解器出发生成候选。优先保留结构性不同且能解决**同一任务**的方案；跨模型族只有在目标与约束仍可公平比较时才有意义。完成目录与文献检索后若只有一个合理方案，明确记录“未找到合理替代”及检索范围:
-
-```
-Qi 候选 <ID>: <模型与模型族>
-  - 适配证据: <对应目标/约束/数据性质>
-  - 实现路径: <库/求解器/自实现>
-  - 可验证优势: <用什么基线或诊断验证>
-  - 风险: <复杂度、假设或数据风险>
-  - 结论: retain / reject；<证据>
+```text
+I1: candidate → adopt for testing / reject
+依据: ...
+若采用，它改变的是：变量 / 约束 / 可行域 / 分解 / 求解策略 / 数据机理边界
+风险: ...
+需要的 baseline/guard: ...
 ```
 
-**反模式 C3 检查**: 若候选只是同一方法换名字，合并重复项；若跨族方案不能解决同一任务，不得为了“多样性”加入。多样性是发现反事实的手段，不是数量门槛。
+`candidate` 不是论文创新点。没有值得采用的机会时正常进入标准模型选择。
 
-### Step 3: 选型决策矩阵 (30 min)
+### Step 1：先问能否解析、化简或重参数化
 
-为每个 Qi 做加权评分:
+在打开算法目录前依次检查：
 
-| 维度 | 权重 | `<候选 1>` | `...` | `<候选 N>` |
-|------|-----|-----------|-------|-----------|
-| 1. 适配度 (与问题契合) | 0.30 | `<score>` | `...` | `<score>` |
-| 2. 求解可行性 (库支持/复杂度) | 0.25 | `<score>` | `...` | `<score>` |
-| 3. 时间预算 (实施所需 h) | 0.20 | `<score>` | `...` | `<score>` |
-| 4. 可验证增益空间 | 0.15 | `<score>` | `...` | `<score>` |
-| 5. 文献或理论支持 | 0.10 | `<score>` | `...` | `<score>` |
-| **加权** | | `<weighted>` | `...` | `<weighted>` |
+1. 是否存在解析关系、守恒量、上下界、单调性、凸性或对称性？
+2. 是否有中间量可以消去，或通过无量纲化/相对量简化？
+3. 是否可以分块、解耦、松弛或按图/树结构局部计算？
+4. 是否能使用 coarse-to-fine、剪枝、局部化或 warm start 缩小求解域？
+5. 已知机理与数据驱动的边界在哪里？如果使用 ML，是否更适合拟合 residual/unknown term？
 
-→ 选择证据最充分且在时间预算内可验证的候选；分数不能替代否决证据。
+这些检查形成 `candidate_formulations`，而不是先形成算法名单。
 
-### Step 4: 可核验命名 (15 min)
+### Step 2：候选 formulation 比较
 
-名称只写已经进入公式、代码或实验的限定条件与机制:
+每个候选记录：
 
-模式: `<已实现且可核验的限定/机制> + <核心模型>`
+```text
+Formulation F1
+- 结构依据：题面/公式/数据中的什么性质
+- 决策变量与状态变量：...
+- 目标与约束：...
+- 近似/消元/分解：...
+- 可能引入的误差或遗漏：...
+- 可验证基线：...
+- 结论：retain / reject
+```
 
-若只实现标准模型，就使用标准名称。不得为了显得创新添加“改进”“自适应”“多层”等修饰词；声称复合、松弛或动态机制时，必须能指向对应公式、代码与消融/基线证据。
+不同 formulation 才是真正有价值的反事实。仅同一 formulation 换 GA/PSO 不算结构性不同。
 
-最终名称与证据位置写入 `decision_log.stages.3.selected_per_subproblem.<Qi>`。
+### Step 3：最后选择模型族和 solver
 
-### Step 5: Toy Demo 验证 (45 min)
+只有 formulation 明确后才读取 `model_catalog.md`。选择能最直接求解当前结构的工具：
 
-为每个 Qi 写最小可执行 demo。规模应足以覆盖关键约束、数据接口和已知失败模式：优先从真实数据构造代表性切片；若真实数据尚不可用，使用明确标注的合成 sanity case。不要用固定行数、固定抽样比例或固定秒数代替可行性证据:
+- 线性/凸结构优先精确优化或解析方法；
+- 树/图结构优先利用图算法和动态结构；
+- 大规模组合问题再考虑启发式或分解；
+- 预测问题可选择统计/ML，但不得无理由丢弃已知结构；
+- 黑箱与复杂模型只有在可验证地解决了简单模型的缺陷时才保留。
+
+候选必须解决同一任务并能公平比较。没有合理替代时记录检索范围，不凑数。
+
+### Step 4：选型决策矩阵
+
+维度建议：问题适配、结构利用程度、求解可行性、时间预算、可验证性、理论/文献支持。分数只是记录工具，不能覆盖明确的数学错误或错误假设。
+
+### Step 5：可核验命名
+
+名称只写已经进入公式、代码或实验的机制。若只实现标准模型，就使用标准名称。不得为了显得创新添加“改进、自适应、多层、融合”等修饰词。
+
+### Step 6：Toy demo / 解析 sanity check
+
+优先使用能暴露关键约束与失败模式的最小真实切片或合成 sanity case：
 
 ```python
-# Qi feasibility demo - 用项目中的实际构造器保持接口一致
 case = build_representative_case(problem_data, cover=critical_constraints)
 model = build_model(case)
 result = solve(model, time_budget=remaining_stage_budget)
-
 assert result.status in accepted_statuses
 assert constraints_hold(result, case)
-record_runtime_and_scale(result, case)
 ```
 
-要求:
-- 求解器状态可解释，输出满足关键约束
-- 数据规模与覆盖范围有记录，能暴露主要失败模式
-- 运行时间不超过该候选在实际 deadline 下的可用预算
-- 结果数量级通过题面边界或独立基线校验
+如有解析解、上下界或手算 toy case，必须拿来交叉验证数值结果。
 
-不通过 → 候选无效,回 Step 2 换。
+### Step 7：创新候选进入 DAG benchmark
 
-### Step 6: 跨子问题模型族协调 (10 min)
+只有被 `adopt for testing` 的 innovation opportunity 才允许通过 `task_dag.py replan` 插入实验任务。例如：
 
-检查全部 Qi 的主模型是否能通过明确接口衔接:
-- 库或数据结构不同是否有可靠转换层?
-- 不同模型族组合时，输入输出、触发条件与误差传播是否明确?
-- 为统一工具而牺牲问题适配度时，回到 Step 3 重评。
-
-写入 `decision_log.stages.3` 的 "model_family_consistency" 字段。
-
-### Step 7 (championship 模式): Red-team 攻击 (30 min)
-
-> 假装最严苛评委，列出能够改变选型结论的实质攻击，并给出可核验回应。合并同义攻击；没有新的实质攻击时停止，不凑数量。
-
-模板:
-```
-攻击: <能够改变选型结论的失败模式>
-证据需求: <benchmark、收敛诊断、接口检查或公式/代码定位>
-回应: <已有证据；没有证据时写待验证，不预填结论>
-状态: resolved | open
+```text
+                 ┌─ baseline-solve ─────┐
+TQi-model ───────┤                      ├─ innovation-compare ─ verify ─ write
+                 └─ proposed-solve ─────┘
 ```
 
-写入 `decision_log.stages.3.red_team`。
+baseline 与 proposed 必须使用公平输入和指标。推荐 A 负责结构/公式，B 负责实现，C 或另一角色独立比较。不得同一执行者提出、实现、复核并自行宣布收益。
 
-### Step 8: 输出移交 (10 min)
+创新候选在此阶段最多是 `tested/adopted`，只有经过 Stage 5/6 的量化比较和定向攻击后才能标记 `verified`。
 
-写入 `decision_log.stages.3`:
+### Step 8：跨子问题协调
+
+检查不同 Qi 的模型接口、单位、误差传播和数据结构。为统一工具而牺牲问题适配度时回退重评。
+
+### Step 9：championship red-team
+
+提出能真正改变选型结论的攻击，例如：
+
+- 关键近似不成立；
+- coarse stage 裁掉最优区；
+- 分解忽略了实质耦合；
+- ML 增益来自泄漏；
+- 复杂模型没有超越简单 baseline。
+
+每项给证据需求和当前状态，不凑数量。
+
+## 写入状态
+
 ```json
 {
-  "candidate_models": [...],
-  "selected_per_subproblem": {
-    "<Qi>": {"name": "...", "library": "...", "rationale": "...", "evidence_paths": [...]}
-  },
-  "rejection_log": [...],
+  "candidate_formulations": [],
+  "candidate_models": [],
+  "selected_per_subproblem": {},
+  "innovation_decisions": [
+    {"id": "I1", "decision": "test|reject", "reason": "...", "dag_tasks": []}
+  ],
+  "rejection_log": [],
   "toy_demos_passed": true,
-  "red_team": [...],
+  "red_team": [],
   "model_family_consistency": "..."
 }
 ```
 
----
-
 ## L1 Rubric
 
 | 维度 | 满分行为 |
-|------|---------|
-| 1. 候选质量与反事实覆盖 | 所有合理替代均被评估；无合理替代时检索范围与原因可审计 |
-| 2. 选型理由 | 每候选有适配 + 不选原因 |
-| 3. 命名准确性 | 每个修饰词均能定位到公式、代码与验证；允许标准名称 |
-| 4. 求解可行性 | toy demo 通过 |
-| 5. 文献/理论支撑 | 关键选型主张有相关且已核验的来源；不以篇数代替相关性 |
-
-championship 额外: red_team 覆盖所有能改变结论的实质攻击，每个回应有证据或明确的待验证状态。
+|---|---|
+| 结构与 formulation | 先处理结构机会，再选算法；保留合理反事实 |
+| 选型理由 | 每候选有适配证据和拒绝理由 |
+| 命名真实性 | 所有修饰词都能定位到公式/代码/实验；允许标准名称 |
+| 求解可行性 | toy/解析 sanity check 通过 |
+| 可验证性 | 创新候选有公平 baseline、风险和 guard 计划 |
 
 ## 常见坑
 
-- C1 为显得创新强行改名 → Step 4 要求名称与实际实现逐项对应
-- C2 模型不匹配 → Step 1 速查表对照
-- C3 候选重复或伪跨族 → 合并同义项，只保留真正可比较的替代
-- C4 选型理由薄弱 → Step 3 5 维矩阵
-- C5 不验证可行性 → Step 5 toy demo
+- 看到题型关键词就直接选 GA/LSTM；
+- 把换 solver 当作 formulation 创新；
+- `A+B+C` 组合却说不清每个组件解决什么困难；
+- 为显得创新强行改名；
+- 没有 baseline 就声称“显著提升”；
+- 为了寻找创新把原本简单可解的问题复杂化。
 
 ## 退出条件
 
-1. 每 Qi 选型完成 + 名称与实现一致
-2. 每 Qi 的合理替代已评估；若无替代，检索范围与理由已记录
-3. toy demo 通过
-4. (championship) 所有实质 red-team 攻击均有证据回应或明确的未解决风险
-5. L1 全维 ≥7
-
-→ 跳转 `stage_04_foundation.md`
+1. 每 Qi 的 structure scan 已被处理；
+2. 主 formulation、模型与 solver 均有证据；
+3. toy/sanity check 通过；
+4. adopted innovation candidates 已进入可验证 DAG 任务，或明确没有候选；
+5. championship red-team 的实质风险有证据动作；
+6. L1 达到工作流阈值。

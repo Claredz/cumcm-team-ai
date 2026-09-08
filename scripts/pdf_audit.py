@@ -8,6 +8,7 @@ from pathlib import Path
 
 OVERFULL_RE = re.compile(r"Overfull \\hbox .*?\((?P<pt>\d+(?:\.\d+)?)pt too wide\)", re.I)
 UNDERFULL_RE = re.compile(r"Underfull \\hbox", re.I)
+VISUAL_REVIEW_CODES = {"sparse-text", "image-density", "overfull-hbox", "underfull-hbox"}
 
 
 def tex_log_issues(content: str):
@@ -28,10 +29,14 @@ def tex_log_issues(content: str):
     return issues
 
 
-def visual_review_passed(review: dict | None) -> bool:
+def visual_review_passed(review: dict | None, issues=None) -> bool:
     if not review or review.get("status") != "passed":
         return False
-    return all(review.get(k) for k in ("reviewer", "reviewed_at", "evidence"))
+    if not all(review.get(k) for k in ("reviewer", "reviewed_at", "evidence")):
+        return False
+    unresolved_nonvisual = {i.get("code") for i in (issues or [])
+                            if i.get("severity") == "review" and i.get("code") not in VISUAL_REVIEW_CODES}
+    return not unresolved_nonvisual
 
 
 def audit(path: Path, competition="cumcm", body_start=None, body_end=None, render_dir=None, dpi=110,
@@ -119,7 +124,7 @@ def audit(path: Path, competition="cumcm", body_start=None, body_end=None, rende
         has_error = any(x["severity"] == "error" for x in issues)
         if has_error:
             status = "failed"
-        elif visual_review_passed(visual_review):
+        elif visual_review_passed(visual_review, issues):
             status = "passed"
         else:
             status = "needs_visual_review"
@@ -138,7 +143,7 @@ def main():
     ap.add_argument("--render-dir", type=Path)
     ap.add_argument("--dpi", type=int, default=110)
     ap.add_argument("--visual-review", type=Path,
-                    help="JSON receipt with status=passed, reviewer, reviewed_at and evidence; only use after actual visual inspection")
+                    help="JSON receipt with status=passed, reviewer, reviewed_at and evidence; only closes visual-only review codes")
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args()
     if not 40 <= a.dpi <= 600:

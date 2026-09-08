@@ -1,13 +1,13 @@
 ---
 name: cumcm-team-ai
-description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电工杯的题面解析、模型选型、代码求解、稳健性、论文写作与编译、PDF 审查、十阶段状态评分和三人 AI 协作。用于备赛、正式参赛及建模论文，不用于普通数据分析。默认自动推进，核心学术判断与最终成果保留队员核验。
+description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电工杯的题面解析、结构扫描、模型选型、代码求解、稳健性、论文写作与编译、PDF 审查、十阶段状态评分和三人 AI 协作。用于备赛、正式参赛及建模论文，不用于普通数据分析。默认自动推进，核心学术判断与最终成果保留队员核验。
 ---
 
 # 数学建模全流程 · cumcm-team-ai v2
 
 默认 interaction=autonomous：AI 主动读题、比较方案、实现、运行、修错、写作和检查；用户已有决定直接复用。只在缺失关键输入、核心学术判断、最终人工核验或外部行动授权时集中询问。guided 是可选教学模式，不要求每阶段回复数字。
 
-本入口及 [integration-policy.md](references/integration-policy.md) 统一解释导入资料：当届规则优先；旧资料的强制问答、固定图数/字数、尾段强制多代理、旧 AI 声明位置不生效。静态分数不是数学证明或获奖概率，不能覆盖真实错误。
+本入口及 [integration-policy.md](references/integration-policy.md) 统一解释导入资料：当届规则优先；旧资料的强制问答、固定图数/字数、尾段强制多代理、旧 AI 声明位置不生效。静态分数不是数学证明或获奖概率，不能覆盖真实错误。**创新优先按 [structural-innovation.md](references/structural-innovation.md) 从问题结构、表示和求解策略中寻找，不把算法堆砌、冷门模型或改名当作创新。允许 0 个创新点。**
 
 ## 启动与恢复
 
@@ -22,23 +22,29 @@ description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电�
 |---|---|---|
 | 0 启动 | 规则、工具、角色、休息与时间预算 | stage_00_kickoff.md、team-workflow.md、schedule.md |
 | 1 选题 | 题目包、附件清单、候选比较 | stage_01_problem_selection.md、parsing-tools.md |
-| 2 拆解 | 每问目标/变量/约束/产物、来源定位和依赖图 | stage_02_analysis.md、production/parsing.md |
-| 3 选模型 | 候选、基线、短试跑、验证计划及取舍 | stage_03_model_selection.md、model_catalog.md、production/modeling.md |
+| 2 拆解 | 每问目标/变量/约束/产物、来源定位、依赖图与结构扫描 | stage_02_analysis.md、structural-innovation.md、production/parsing.md |
+| 3 选模型 | 先定表示/formulation，再选模型与 solver；候选、基线、短试跑、创新 benchmark 计划 | stage_03_model_selection.md、structural-innovation.md、model_catalog.md、production/modeling.md |
 | 4 建基础 | 假设、符号、单位、术语及数据口径 | stage_04_foundation.md、共享表格模板 |
-| 5 求解 | 每问可运行实现、结果、日志、解释 | stage_05_subproblem_loop.md、production/coding.md；templates/shared/code_starter/ |
-| 6 稳健性 | 有依据的扰动、边界/误差/残差检查 | stage_06_robustness.md、verification.md |
+| 5 求解 | 每问可运行实现、结果、日志、解释；按需 baseline/proposed 对照 | stage_05_subproblem_loop.md、production/coding.md；templates/shared/code_starter/ |
+| 6 稳健性 | 有依据的扰动、边界/误差/残差检查；对 adopted innovation 做定向 failure test | stage_06_robustness.md、structural-innovation.md、verification.md |
 | 7 评价 | 优点、证据、局限和适用范围 | stage_07_evaluation.md |
-| 8 论文 | 编号章节、真实引用、LaTeX/PDF、AI 报告 | stage_08_writing.md、paper-tools.md、academic-style.md、production/writing.md、production/visualization.md |
+| 8 论文 | 编号章节、真实引用、LaTeX/PDF、AI 报告；只写 verified innovation claim | stage_08_writing.md、structural-innovation.md、paper-tools.md、academic-style.md、production/writing.md、production/visualization.md |
 | 9 终审 | 重跑证据、页面图、合规检查、冻结清单 | stage_09_review.md、production/review.md、当届规则 |
 
 第 8 阶段草稿从第 2 阶段开始积累，正式完成时间不等于写作开始。按依赖并行；上游改变后标记依赖结果过期，重算再更新论文。
+
+## Stage 2 后：DAG 是实际调度中心
+
+Stage 0–2 负责统一读题、选题和问题分解；**Stage 2 完成后，日常执行以 `task_dag.json` 为中心，而十阶段主要作为 macro quality gates。** `task_dag.py init` 默认生成每问 `model → solve → verify → write` 骨架以及 foundation/data/paper 三条共享线，A/B/C 只要依赖满足就并行领取 ready task。
+
+结构创新不会新增长期“创新阶段”。`TQi-model` 必须读取 Stage 2 的 `structure_scan`；只有某个 innovation opportunity 值得验证时，才用 `task_dag.py replan` 动态插入 baseline/proposed/compare 或 ablation 任务。创新候选失败时保留证据并标记 rejected，不为了论文创新点继续使用错误方案。
 
 ## 自动化工具
 
 完整命令见 [toolchain.md](references/toolchain.md)。语义理解和生成由当前 AI 执行，脚本负责确定性解析、状态、检查和渲染，不假称可自动求解任意赛题；不需要特定模型 API 密钥。
 
 - parse_problem.py：PDF/DOCX/Markdown/TXT 文本、分问候选、来源定位、CSV/Excel 概况和题型候选；扫描页标记待 OCR。AI 核对公式、分问和隐含约束后完善题目包。
-- task_dag.py：读题（Stage 2 拆解）完成后把任务组成有向无环图派给 A/B/C：init 生成骨架、board 出认领看板、done 需交叉复核回执与产物指纹、replan/invalidate 保留历史地调整结构和级联失效上游变化。
+- task_dag.py：读题（Stage 2 拆解）完成后把任务组成有向无环图派给 A/B/C：init 生成骨架、board 出认领看板、done 需交叉复核回执与产物指纹、replan/invalidate 保留历史地调整结构和级联失效上游变化。创新 benchmark 通过 replan 动态插入，不固定凑任务。
 - workflow.py：初始化、恢复、下一步、阶段完成与回退；`reconcile` 在每次工作会话收尾前只读检查阶段账、DAG、产物漂移和“工作已做到后面但主状态仍滞后”的 bookkeeping lag，不自动伪造 receipt。阶段完成需实际文件摘要和检查记录，正式赛核心节点需真实人工复核，可集中进行。
 - score_artifact.py：L1 评分校验、加权、逐问聚合与日志持久化。L2 定向回检、L3 多视角、L4 经验校准见 feedback_layer*.md，按风险和时间选用。
 - render_paper.py：10 个 Markdown 章节→三赛事 LaTeX→PDF，支持 XeLaTeX/pdfLaTeX 及 Tectonic。--no-compile 只产生结构稿。
@@ -46,13 +52,16 @@ description: 数学建模全流程 skill，覆盖 CUMCM 国赛、MCM/ICM 与电�
 - pdf_audit.py：按赛事区分摘要/正文/附录/AI 报告计页，检查缺字、占位、元数据、图形密度和 TeX `Overfull/Underfull \\hbox`，渲染逐页 PNG。自动检查通过后仍需真实视觉复核；用 `--visual-review` 传实际复核回执后才可返回 passed。
 - citation_audit.py：检查 BibTeX/LaTeX/Pandoc 引用键或编号参考文献与正文引用的一致性；“有参考文献、正文零引用”和未定义引用直接失败，未引用文献默认要求复核。
 - verify_independence.py：独立复算的结构性防同源门，拒绝 verifier 与被验实现同文件/同内容、直接 import 或明显路径字面量重跑；通过不等于数学独立，仍需交叉复核。
-- claim_registry.py：把论文 headline claim 绑定到 source/source_field、实现、验证器、独立性报告及 SHA256；verified claim 缺证据或证据文件漂移时 `check` 失败，旧版本保留在 history。
+- claim_registry.py：把论文 headline claim 绑定到 source/source_field、实现、验证器、独立性报告及 SHA256；`kind=innovation` 时额外绑定结构化 baseline/proposed/metrics/risk/guard 证据。verified claim 缺证据或证据漂移时 `check` 失败，旧版本保留在 history。
+- final_gate.py：汇总 workflow、claim provenance、citation、PDF、合规；Stage 8 显式列出的 innovation claim 必须是已注册且 verified 的 innovation kind，并绑定对应 paper_ref，否则最终状态 BLOCKED。
 - prose_lint.py：中英表达建议及改写前后数字、公式、引用对照；不自动改原文，不宣称检测 AI 率。
 - corpus.py：本地论文导入、SHA256 去重、提取 QA、索引、按年/题型统计。data/papers/ 包含来源数据集和上游统计来源；全文不默认公开分发。
 
 ## 三人、AI 和低干预协作
 
-A 管模型，B 管数据求解，C 管论证交付，可按能力调整。读题完成前按十阶段推进；Stage 2 拆解后切换为 DAG 派单：任务成图、就绪即认领、完成需交叉复核、上游变化级联失效并可重规划（见 team-workflow.md「DAG 派单模式」）。任务卡包括输入版本、可写范围、输出、验收、时限、负责人和复核人。默认建议 3 条产出线加可选只读检查线。同一文件单写者，主协调人写根状态；任务执行状态只写 DAG。实际子代理/外部任务遵守用户与环境授权，读取 skill 本身不创建新任务。
+A 管模型，B 管数据求解，C 管论证交付，可按能力调整。读题完成前按十阶段推进；Stage 2 拆解后切换为 DAG 派单：任务成图、就绪即认领、完成需交叉复核、上游变化级联失效并可重规划。任务卡包括输入版本、可写范围、输出、验收、时限、负责人和复核人。默认建议 3 条产出线加可选只读检查线。同一文件单写者，主协调人写根状态；任务执行状态只写 DAG。实际子代理/外部任务遵守用户与环境授权，读取 skill 本身不创建新任务。
+
+创新 benchmark 也遵守职责分离：提出结构的人不应独自完成实现、比较和最终收益判定。典型做法是 A 负责结构/formulation，B 跑公平 baseline/proposed，C 或另一角色复核指标、失败边界和论文证据。
 
 少数真实人工节点：选题和核心假设、核心结果核验、最终作品。AI 先做成可检查产物再集中交接，不让人手工管理 JSON、命令和例行错误。遇可修复的 high issue 自动修复重跑；block 表示不放行错误产物，不等于停止所有工作。
 

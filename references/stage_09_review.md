@@ -65,7 +65,7 @@ These are maintainer heuristics, not official scoring weights. Fix high-severity
 
 ## 3. Verify the evidence chain
 
-Cross-check the final paper against `decision_log.json` and the saved artifacts:
+Cross-check the final paper against `decision_log.json`, `state/claims.json` and the saved artifacts:
 
 - no abandoned model remains in the abstract or conclusion;
 - no symbol changes meaning between sections;
@@ -73,6 +73,26 @@ Cross-check the final paper against `decision_log.json` and the saved artifacts:
 - every figure/table path resolves and its caption matches the content;
 - every external claim has a verified source;
 - AI-generated citations have been opened and checked manually.
+
+Run the mechanical evidence gates before accepting the prose:
+
+```bash
+python <skill>/scripts/claim_registry.py check --workspace <project>
+python <skill>/scripts/citation_audit.py --paper <project>/paper/ --output <project>/state/citation-audit.json
+```
+
+A failed claim registry means a source/verifier/independence artifact changed after registration or a verified claim lacks evidence. A failed citation audit means the citation/reference structure is not acceptable. Neither may be overridden by a panel score.
+
+For every verification script advertised as independent, the corresponding structural independence report must be `passed`:
+
+```bash
+python <skill>/scripts/verify_independence.py \
+  --verifier <project>/src/q3/verify_independent.py \
+  --implementation <project>/src/q3/solve.py \
+  --output <project>/runs/q3/independence.json
+```
+
+This only guards against explicit self-import/re-run patterns; the reviewer must still verify true algorithmic independence.
 
 ## 4. Review presentation
 
@@ -104,9 +124,29 @@ For CUMCM with AI use, verify `support_materials/AI工具使用详情.pdf` is in
 
 ## 7. Compile and inspect the final PDF
 
-Use `<skill>/scripts/render_paper.py` or the selected LaTeX engine. Compilation succeeds only when the PDF exists, includes all intended sections, and has no unresolved high-severity warnings. Visually inspect the first page, dense equations, wide tables, figure-heavy pages, references, appendices, and the AI report.
+Use `<skill>/scripts/render_paper.py` or the selected LaTeX engine. Compilation succeeds only when the PDF exists, includes all intended sections, and has no unresolved high-severity warnings.
 
-## 8. Persist the final gate
+First run automatic audit and page rendering:
+
+```bash
+python <skill>/scripts/pdf_audit.py <project>/paper_workspace/main.pdf \
+  --competition <competition> --render-dir <project>/paper_workspace/pages \
+  --output <project>/state/pdf-audit.json
+```
+
+The audit parses the matching TeX `.log`; Overfull >10pt is an error, smaller Overfull and Underfull warnings require review. If there is no automatic error, the result is still `needs_visual_review`.
+
+Then visually inspect the first page, dense equations, wide tables, figure-heavy pages, references, appendices, and the AI report. Record a real visual receipt containing `status=passed`, `reviewer`, `reviewed_at`, and `evidence`, then re-run with `--visual-review`. Only that second run may return `passed`.
+
+## 8. Reconcile and persist the final gate
+
+Before marking submission-ready, run:
+
+```bash
+python <skill>/scripts/workflow.py reconcile --workspace <project>
+```
+
+`bookkeeping-lag`, artifact drift, or DAG inconsistency must be resolved first. Reconcile is read-only and cannot substitute for missing stage receipts.
 
 Write actual runtime-derived counts and paths. The schema is:
 
@@ -135,9 +175,12 @@ The `null` values above are schema placeholders only. Replace every one with an 
 
 - current official rules verified with no unresolved violation;
 - anti-pattern and consistency checks completed;
+- `claim_registry.py check` passed and citation audit has no failed status;
+- all advertised independent verifiers have passed structural guards and actual independent review;
 - all high-severity panel findings resolved;
-- PDF compiled and visually inspected;
+- PDF automatic audit passed after a real visual-review receipt;
 - AI disclosure and supporting materials complete when required;
+- `workflow.py reconcile` has no bookkeeping/artifact/DAG warnings;
 - `decision_log.stages.9.submission_ready == true`.
 
 Only then hand the final submission package back to the team.

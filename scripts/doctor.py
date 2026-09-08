@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -91,6 +93,18 @@ def _anti_pattern_count(path: Path) -> int:
     return len(re.findall(r"^###\s+[A-Z]\d+\.\s", text, re.MULTILINE))
 
 
+def _platform_label() -> str:
+    system = platform.system() or "Unknown"
+    release = platform.release()
+    if system == "Linux" and (
+        os.environ.get("WSL_DISTRO_NAME")
+        or "microsoft" in release.lower()
+    ):
+        distro = os.environ.get("WSL_DISTRO_NAME", "WSL")
+        return f"WSL/Linux ({distro}; {release})"
+    return f"{system} ({release})"
+
+
 def _tex_file_available(filename: str) -> bool:
     """Ask the active TeX distribution whether a required class/package exists."""
     kpsewhich = shutil.which("kpsewhich")
@@ -115,11 +129,21 @@ def run_checks(
 ) -> list[Check]:
     checks: list[Check] = []
 
+    system = platform.system()
+    supported_platform = system in {"Windows", "Linux"}
+    checks.append(_optional(
+        "platform",
+        supported_platform,
+        _platform_label(),
+        "Official CI support targets Windows 10/11 PowerShell and Linux/WSL2; other systems are best-effort."
+        if not supported_platform else None,
+    ))
+
     py_ok = sys.version_info >= (3, 10)
     checks.append(_check(
         "python",
         py_ok,
-        f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} at {sys.executable}",
         "Install Python 3.10 or newer." if not py_ok else None,
     ))
 
@@ -128,6 +152,8 @@ def run_checks(
         "AGENTS.md",
         "agents/openai.yaml",
         "config/dim_weights.json",
+        "references/setup-windows.md",
+        "references/setup-linux-wsl.md",
         "templates/shared/decision_log.json",
         "scripts/workflow.py",
         "scripts/task_dag.py",
@@ -136,6 +162,7 @@ def run_checks(
         "scripts/render_paper.py",
         "scripts/render_ai_usage.py",
         "scripts/pdf_audit.py",
+        "scripts/check_layout.py",
         "scripts/citation_audit.py",
         "scripts/verify_independence.py",
         "scripts/claim_registry.py",
@@ -351,12 +378,12 @@ def run_checks(
 
 
 def _print_human(checks: list[Check]) -> None:
-    symbols = {"pass": "✓", "warn": "!", "fail": "✗"}
+    labels = {"pass": "[OK]", "warn": "[WARN]", "fail": "[FAIL]"}
     for item in checks:
-        print(f"{symbols[item.status]} {item.name}: {item.detail}")
+        print(f"{labels[item.status]} {item.name}: {item.detail}")
         if item.fix and item.status != "pass":
-            print(f"  ↳ {item.fix}")
-    counts = {status: sum(item.status == status for item in checks) for status in symbols}
+            print(f"       fix: {item.fix}")
+    counts = {status: sum(item.status == status for item in checks) for status in labels}
     print(
         f"\nSummary: {counts['pass']} passed, "
         f"{counts['warn']} optional warnings, {counts['fail']} failed"

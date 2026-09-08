@@ -43,6 +43,10 @@ class PdfLogGateTests(unittest.TestCase):
             "status": "passed", "reviewer": "C", "reviewed_at": "2026-09-08T20:00:00+08:00",
             "evidence": "逐页查看渲染 PNG 与最终 PDF",
         }))
+        self.assertFalse(pdf_audit.visual_review_passed({
+            "status": "passed", "reviewer": "C", "reviewed_at": "2026-09-08T20:00:00+08:00",
+            "evidence": "逐页查看",
+        }, [{"severity": "review", "code": "ai-declaration"}]))
 
 
 class CitationGateTests(unittest.TestCase):
@@ -104,7 +108,7 @@ class ClaimRegistryTests(unittest.TestCase):
             source.write_text('{"served_total":26850.57}', encoding="utf-8")
             impl.write_text("def solve(): return 26850.57\n", encoding="utf-8")
             verifier.write_text("assert abs(26850.57 - 26850.57) < 1e-9\n", encoding="utf-8")
-            indep.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+            indep.write_text(json.dumps(verify_independence.audit(verifier, impl)), encoding="utf-8")
             claim_registry.register(
                 workspace, "q3.served_total", "26850.57", "person-times",
                 "runs/result.json", "served_total", status="verified",

@@ -62,7 +62,26 @@ class TaskDagTests(unittest.TestCase):
         self.assertIn("TQ1-solve", ids)
         self.assertIn("TQ2-model", ids)
         q2_model = next(t for t in state["tasks"] if t["id"] == "TQ2-model")
+        q2_solve = next(t for t in state["tasks"] if t["id"] == "TQ2-solve")
         self.assertEqual(q2_model["deps"], ["T0-foundation", "TQ1-model"])
+        self.assertIn("TQ1-verify", q2_solve["deps"])
+
+    def test_structured_dependency_distinguishes_model_and_result_edges(self):
+        make_log(self.ws, {
+            "Q1": {"model_depends_on": [], "result_depends_on": []},
+            "Q2": {"model_depends_on": [], "result_depends_on": ["Q1"]},
+        })
+        state = task_dag.init(self.ws, None)
+        by_id = {t["id"]: t for t in state["tasks"]}
+        self.assertNotIn("TQ1-model", by_id["TQ2-model"]["deps"])
+        self.assertIn("TQ1-verify", by_id["TQ2-solve"]["deps"])
+
+    def test_unknown_structured_dependency_is_rejected(self):
+        make_log(self.ws, {
+            "Q1": {"model_depends_on": [], "result_depends_on": ["Q9"]},
+        })
+        with self.assertRaisesRegex(ValueError, "unknown subproblems"):
+            task_dag.init(self.ws, None)
 
     def test_init_requires_stage2(self):
         make_log(self.ws, {})
@@ -89,6 +108,30 @@ class TaskDagTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             task_dag.init(self.ws, seed)
 
+    def test_nested_single_writer_conflict_rejected_when_concurrent(self):
+        seed = [
+            {"id": "T1", "role": "A", "writable_paths": ["paper/"]},
+            {"id": "T2", "role": "C", "writable_paths": ["paper/sections/Q1/"]},
+        ]
+        with self.assertRaisesRegex(ValueError, "overlapping scopes"):
+            task_dag.init(self.ws, seed)
+
+    def test_nested_single_writer_allowed_when_dependency_orders_handoff(self):
+        seed = [
+            {"id": "T1", "role": "A", "writable_paths": ["paper/"]},
+            {"id": "T2", "role": "C", "deps": ["T1"], "writable_paths": ["paper/sections/Q1/"]},
+        ]
+        state = task_dag.init(self.ws, seed)
+        self.assertEqual(len(state["tasks"]), 2)
+
+    def test_disjoint_sibling_paths_are_allowed(self):
+        seed = [
+            {"id": "T1", "role": "A", "writable_paths": ["src/Q1/"]},
+            {"id": "T2", "role": "B", "writable_paths": ["src/Q2/"]},
+        ]
+        state = task_dag.init(self.ws, seed)
+        self.assertEqual(len(state["tasks"]), 2)
+
     def test_self_review_rejected(self):
         seed = [{"id": "T1", "role": "A", "reviewer": "A"}]
         with self.assertRaises(ValueError):
@@ -97,17 +140,13 @@ class TaskDagTests(unittest.TestCase):
     def test_dispatch_gating_and_done_requires_cross_receipt(self):
         task_dag.init(self.ws, [{"id": "T1", "role": "A", "writable_paths": ["models/"]},
                                 {"id": "T2", "role": "B", "deps": ["T1"]}])
-        # T2 blocked while T1 unfinished
         with self.assertRaises(ValueError):
             task_dag.update(self.ws, "T2", "in_progress", None)
-        # done without receipt refused
         with self.assertRaises(ValueError):
             task_dag.update(self.ws, "T1", "done", None)
-        # receipt from the wrong reviewer refused
         rel = artifact_file(self.ws, "models/m.md")
         with self.assertRaises(ValueError):
             task_dag.update(self.ws, "T1", "done", receipt(self.ws, "A", [rel]))
-        # proper cross-review by C
         task_dag.update(self.ws, "T1", "done", receipt(self.ws, "B", [rel]))
         task_dag.update(self.ws, "T2", "in_progress", None)
         b = task_dag.board(self.ws)
@@ -127,24 +166,20 @@ class TaskDagTests(unittest.TestCase):
         by_id = {t["id"]: t for t in state["tasks"]}
         self.assertEqual(by_id["T4"]["status"], "planned")
         self.assertEqual(by_id["T3"]["status"], "stale")
-        # history preserved, nothing deleted
         self.assertTrue(all("history" in t for t in state["tasks"]))
 
     def test_reinvalidate_through_already_stale_node_still_propagates(self):
-        # regression: a stale node must still forward invalidation to its own downstream
         task_dag.init(self.ws, [
             {"id": "T1", "role": "A"},
             {"id": "T2", "role": "B", "deps": ["T1"]},
             {"id": "T3", "role": "C", "deps": ["T2"]},
         ])
         task_dag.invalidate(self.ws, ["T2"], "上游 T2 先失效")
-        # T1 later invalidated; T3 must now be cascaded through the already-stale T2
         out = task_dag.invalidate(self.ws, ["T1"], "T1 也失效")
         self.assertEqual(out["invalidated"], ["T1", "T2", "T3"])
         state = task_dag.load(self.ws)
         t3 = next(t for t in state["tasks"] if t["id"] == "T3")
         self.assertEqual(t3["status"], "stale")
-        # T2 keeps one history entry per invalidate, not duplicated
         t2 = next(t for t in state["tasks"] if t["id"] == "T2")
         stale_entries = [h for h in t2["history"] if h.get("to") == "stale"]
         self.assertEqual(len(stale_entries), 1)
@@ -167,8 +202,6 @@ class TaskDagTests(unittest.TestCase):
             {"id": "T3", "role": "C", "deps": ["T1"]},
             {"id": "T2", "title": "Q1 求解（改用启发式）", "deps": ["T1", "T3"]},
         ], cancel=["T1"], reason="发现 Q1 可独立于基础层")
-        # cancelling a task that others depend on is allowed but leaves them blocked;
-        # T1 has no status yet so cancel is fine
         state = task_dag.load(self.ws)
         self.assertEqual(state["dag_version"], 2)
         by_id = {t["id"]: t for t in state["tasks"]}
